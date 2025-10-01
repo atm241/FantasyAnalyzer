@@ -7,6 +7,7 @@ import { LineupOptimizer } from './services/optimizer.js';
 import { WaiverAnalyzer } from './services/waivers.js';
 import { AISummaryService } from './services/aiSummary.js';
 import { FirstToGoAnalyzer } from './services/firstToGo.js';
+import { StandingsAnalyzer } from './services/standings.js';
 import { DisplayFormatter } from './display/formatter.js';
 import readline from 'readline';
 
@@ -16,6 +17,7 @@ const optimizer = new LineupOptimizer(rosterService);
 const waiverAnalyzer = new WaiverAnalyzer(rosterService, api);
 const aiSummary = new AISummaryService(rosterService);
 const firstToGo = new FirstToGoAnalyzer(rosterService);
+const standings = new StandingsAnalyzer(api, rosterService);
 const display = new DisplayFormatter();
 
 /**
@@ -106,6 +108,13 @@ async function runAnalyzer(username, leagueId) {
     }
 
     display.displaySuccess(`Analyzing league: ${league.name}`);
+
+    // Analyze league standings and playoff probability
+    display.displayInfo('Calculating standings and playoff probability...');
+    const standingsAnalysis = await standings.analyzeStandings(user.user_id, league.league_id);
+    console.log('\n' + '='.repeat(70));
+    console.log(standings.formatStandings(standingsAnalysis));
+    console.log('='.repeat(70) + '\n');
 
     // Get user's roster
     const roster = await rosterService.getUserRoster(user.user_id, league.league_id);

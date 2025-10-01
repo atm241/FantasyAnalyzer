@@ -73,4 +73,12 @@ export class SleeperAPI {
     const response = await axios.get(`${this.baseURL}/players/nfl/trending/${type}?lookback_hours=${hours}`);
     return response.data;
   }
+
+  /**
+   * Get matchups for a specific week
+   */
+  async getMatchups(leagueId, week) {
+    const response = await axios.get(`${this.baseURL}/league/${leagueId}/matchups/${week}`);
+    return response.data;
+  }
 }
