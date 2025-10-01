@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { program } from 'commander';
-import { SleeperAPI } from './api/sleeper.js';
+import { PlatformAdapter } from './adapters/platformAdapter.js';
 import { RosterService } from './services/roster.js';
 import { LineupOptimizer } from './services/optimizer.js';
 import { WaiverAnalyzer } from './services/waivers.js';
@@ -11,13 +11,7 @@ import { StandingsAnalyzer } from './services/standings.js';
 import { DisplayFormatter } from './display/formatter.js';
 import readline from 'readline';
 
-const api = new SleeperAPI();
-const rosterService = new RosterService(api);
-const optimizer = new LineupOptimizer(rosterService);
-const waiverAnalyzer = new WaiverAnalyzer(rosterService, api);
-const aiSummary = new AISummaryService(rosterService);
-const firstToGo = new FirstToGoAnalyzer(rosterService);
-const standings = new StandingsAnalyzer(api, rosterService);
+let api, rosterService, optimizer, waiverAnalyzer, aiSummary, firstToGo, standings;
 const display = new DisplayFormatter();
 
 /**
@@ -109,6 +103,68 @@ async function runAnalyzer(username, leagueId) {
 
     display.displaySuccess(`Analyzing league: ${league.name}`);
 
+    // For ESPN, find the user's team by matching username/team name
+    if (api.platform === 'espn') {
+      const users = await api.getLeagueUsers(league.league_id);
+
+      // Try to match by display name or team name
+      const matchedUser = users.find(u =>
+        u.display_name?.toLowerCase().includes(username.toLowerCase()) ||
+        u.metadata?.team_name?.toLowerCase().includes(username.toLowerCase())
+      );
+
+      if (matchedUser) {
+        user = matchedUser;
+        display.displayInfo(`Matched to team: ${user.metadata?.team_name || user.display_name}`);
+      } else {
+        // If no match, show available teams with roster preview
+        console.log('\nCould not auto-match your team. Please select from the list:');
+
+        const rosters = await api.getLeagueRosters(league.league_id);
+        const allPlayers = await rosterService.loadPlayers();
+
+        // Check if we have roster data
+        const hasRosterData = rosters.some(r => r.players && r.players.length > 0);
+
+        if (hasRosterData) {
+          console.log('(Showing top players on each team to help identify yours)\n');
+        } else {
+          console.log('(League rosters not yet populated - check your ESPN app for team owner names)\n');
+        }
+
+        for (let idx = 0; idx < users.length; idx++) {
+          const u = users[idx];
+          const roster = rosters.find(r => r.owner_id === u.user_id);
+
+          const teamInfo = u.metadata?.team_name !== `Team ${u.user_id}` ?
+            `${u.metadata?.team_name}` :
+            `Team ${idx + 1}`;
+
+          console.log(`${idx + 1}. ${teamInfo}`);
+
+          // Show top 3 players if available
+          if (hasRosterData && roster && roster.players && roster.players.length > 0) {
+            const topPlayers = roster.players.slice(0, 3).map(playerId => {
+              const player = allPlayers[playerId];
+              return player?.full_name || 'Unknown Player';
+            });
+            console.log(`   Players: ${topPlayers.join(', ')}${roster.players.length > 3 ? '...' : ''}`);
+          }
+          console.log('');
+        }
+
+        const selection = await prompt('Select your team number: ');
+        const teamIndex = parseInt(selection) - 1;
+
+        if (teamIndex >= 0 && teamIndex < users.length) {
+          user = users[teamIndex];
+        } else {
+          display.displayError('Invalid team selection');
+          return;
+        }
+      }
+    }
+
     // Analyze league standings and playoff probability
     display.displayInfo('Calculating standings and playoff probability...');
     const standingsAnalysis = await standings.analyzeStandings(user.user_id, league.league_id);
@@ -180,15 +236,58 @@ async function runAnalyzer(username, leagueId) {
 // CLI setup
 program
   .name('fantasy-analyzer')
-  .description('Sleeper fantasy football lineup optimizer and waiver wire analyzer')
+  .description('Fantasy football lineup optimizer and waiver wire analyzer for Sleeper and ESPN')
   .version('1.0.0')
-  .option('-u, --username <username>', 'Your Sleeper username')
-  .option('-l, --league <leagueId>', 'League ID (optional, will prompt if not provided)')
+  .option('-p, --platform <platform>', 'Platform: sleeper or espn (default: sleeper)', 'sleeper')
+  .option('-u, --username <username>', 'Your username (Sleeper only)')
+  .option('-l, --league <leagueId>', 'League ID')
+  .option('--espn-s2 <espnS2>', 'ESPN S2 cookie (for private leagues)')
+  .option('--swid <swid>', 'ESPN SWID cookie (for private leagues)')
+  .option('-s, --season <season>', 'Season year (default: 2025)', '2025')
   .action(async (options) => {
-    if (!options.username) {
-      console.log('Welcome to Fantasy Analyzer!\n');
-      options.username = await prompt('Enter your Sleeper username: ');
+    const platform = options.platform.toLowerCase();
+
+    console.log(`Welcome to Fantasy Analyzer (${platform.toUpperCase()})!\n`);
+
+    // Initialize platform adapter
+    const config = {
+      season: parseInt(options.season),
+      leagueId: options.league
+    };
+
+    if (platform === 'espn') {
+      // ESPN-specific config
+      if (options.espnS2 && options.swid) {
+        config.cookies = {
+          espn_s2: options.espnS2,
+          SWID: options.swid
+        };
+      }
+
+      if (!options.league) {
+        options.league = await prompt('Enter your ESPN League ID: ');
+        config.leagueId = options.league;
+      }
+
+      // ESPN doesn't use username, so create a placeholder
+      if (!options.username) {
+        options.username = await prompt('Enter your team name or identifier: ');
+      }
+    } else {
+      // Sleeper-specific
+      if (!options.username) {
+        options.username = await prompt('Enter your Sleeper username: ');
+      }
     }
+
+    // Initialize API and services
+    api = new PlatformAdapter(platform, config);
+    rosterService = new RosterService(api);
+    optimizer = new LineupOptimizer(rosterService);
+    waiverAnalyzer = new WaiverAnalyzer(rosterService, api);
+    aiSummary = new AISummaryService(rosterService);
+    firstToGo = new FirstToGoAnalyzer(rosterService);
+    standings = new StandingsAnalyzer(api, rosterService);
 
     await runAnalyzer(options.username, options.league);
   });
