@@ -7,12 +7,10 @@ export class LineupOptimizer {
   }
 
   /**
-   * Simple projection model (can be enhanced with real projections API)
-   * For now, uses a basic heuristic based on player status and position
+   * Enhanced projection model with player quality tiers
    */
   estimatePoints(player, scoringSettings) {
-    // This is a placeholder - in production you'd fetch actual projections
-    // from ESPN, FantasyPros, or another source
+    // Base points by position
     const basePoints = {
       'QB': 18,
       'RB': 12,
@@ -35,7 +33,78 @@ export class LineupOptimizer {
     if (player.injuryStatus === 'Questionable') points *= 0.7;
     if (player.injuryStatus === 'IR') points = 0;
 
+    // Apply player quality modifiers based on tier
+    points *= this.getPlayerQualityMultiplier(player);
+
     return points;
+  }
+
+  /**
+   * Get player quality multiplier based on name/team/situation
+   * This helps differentiate between elite, good, mediocre, and bad players
+   */
+  getPlayerQualityMultiplier(player) {
+    const name = player.name?.toLowerCase() || '';
+    const team = player.team;
+    const position = player.position;
+
+    // Elite tier players (1.3-1.5x multiplier)
+    const elitePlayers = [
+      'christian mccaffrey', 'bijan robinson', 'breece hall', 'jahmyr gibbs',
+      'derrick henry', 'jonathan taylor', 'saquon barkley', 'josh jacobs',
+      'tyreek hill', 'ceedee lamb', 'amon-ra st. brown', 'justin jefferson',
+      'stefon diggs', 'cooper kupp', 'puka nacua', 'garrett wilson',
+      'travis kelce', 'sam lachance', 'george kittle', 'tj hockenson',
+      'josh allen', 'lamar jackson', 'jalen hurts', 'patrick mahomes'
+    ];
+
+    // Good tier players (1.1-1.2x multiplier)
+    const goodPlayers = [
+      'tony pollard', 'rachaad white', 'devin singletary', 'chuba hubbard',
+      'courtland sutton', 'dj moore', 'george pickens', 'josh downs',
+      'jayden reed', 'drake london', 'zay flowers', 'brian thomas',
+      'jonnu smith', 'dalton schultz', 'cole kmet', 'david njoku'
+    ];
+
+    // Below average tier (0.7-0.8x multiplier) - backups, bad situations
+    const belowAverage = [
+      'jerome ford', 'justice hill', 'roschon johnson', 'tyjae spears',
+      'elijah mitchell', 'ty chandler', 'alexander mattison', 'jaleel mclaughlin',
+      'tre tucker', 'josh reynolds', 'michael wilson', 'romeo doubs',
+      'calvin austin', 'jalen tolbert', 'tyler boyd', 'kendrick bourne'
+    ];
+
+    // Bad offense teams get penalty
+    const weakOffenses = ['CAR', 'NE', 'TEN', 'NYG', 'LV', 'JAX', 'CHI'];
+    const goodOffenses = ['KC', 'SF', 'BAL', 'BUF', 'MIA', 'DAL', 'PHI', 'DET'];
+
+    let multiplier = 1.0;
+
+    // Check player tier
+    if (elitePlayers.some(p => name.includes(p))) {
+      multiplier = 1.4;
+    } else if (goodPlayers.some(p => name.includes(p))) {
+      multiplier = 1.15;
+    } else if (belowAverage.some(p => name.includes(p))) {
+      multiplier = 0.75;
+    }
+
+    // Team quality modifier
+    if (weakOffenses.includes(team)) {
+      multiplier *= 0.85;
+    } else if (goodOffenses.includes(team)) {
+      multiplier *= 1.1;
+    }
+
+    // Backup RBs and WR3+ get further penalty if not elite
+    if (position === 'RB' && multiplier < 1.1) {
+      // Additional penalty for known backups
+      if (name.includes('hill') || name.includes('ford') || name.includes('mattison')) {
+        multiplier *= 0.8;
+      }
+    }
+
+    return multiplier;
   }
 
   /**
@@ -111,20 +180,43 @@ export class LineupOptimizer {
     }, 0);
 
     const recommendations = [];
+    const swapPairs = new Set(); // Track player pairs to avoid circular swaps
+    const MIN_IMPROVEMENT = 0.5; // Minimum points improvement to recommend a swap
 
     // Find lineup improvements
     formatted.starters.forEach((starter, idx) => {
       const optimalPlayer = optimal.lineup[idx];
       if (optimalPlayer && !optimalPlayer.empty &&
           starter.playerId !== optimalPlayer.playerId) {
+
+        const improvement = optimalPlayer.projection - this.estimatePoints(starter, {});
+
+        // Only recommend if improvement is meaningful
+        if (improvement < MIN_IMPROVEMENT) {
+          return;
+        }
+
+        // Create a unique pair identifier (sorted to catch A->B and B->A)
+        const pairKey = [starter.playerId, optimalPlayer.playerId].sort().join('-');
+
+        // Skip if we've already seen this pair (prevents circular swaps)
+        if (swapPairs.has(pairKey)) {
+          return;
+        }
+
+        swapPairs.add(pairKey);
+
         recommendations.push({
           type: 'swap',
           out: starter,
           in: optimalPlayer,
-          improvement: optimalPlayer.projection - this.estimatePoints(starter, {})
+          improvement
         });
       }
     });
+
+    // Sort recommendations by improvement (highest first)
+    recommendations.sort((a, b) => b.improvement - a.improvement);
 
     return {
       currentLineup: formatted.starters,
