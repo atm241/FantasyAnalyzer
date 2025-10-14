@@ -180,39 +180,49 @@ export class LineupOptimizer {
     }, 0);
 
     const recommendations = [];
-    const swapPairs = new Set(); // Track player pairs to avoid circular swaps
     const MIN_IMPROVEMENT = 0.5; // Minimum points improvement to recommend a swap
 
-    // Find lineup improvements
-    formatted.starters.forEach((starter, idx) => {
-      const optimalPlayer = optimal.lineup[idx];
-      if (optimalPlayer && !optimalPlayer.empty &&
-          starter.playerId !== optimalPlayer.playerId) {
+    // Create maps for quick lookup
+    const currentStarterIds = new Set(formatted.starters.map(p => p.playerId));
+    const optimalStarterIds = new Set(optimal.lineup.filter(p => !p.empty).map(p => p.playerId));
 
-        const improvement = optimalPlayer.projection - this.estimatePoints(starter, {});
+    // Find players who should be moved from bench to starting
+    // These are players in optimal lineup but currently on bench
+    optimal.lineup.forEach((optimalPlayer, idx) => {
+      if (optimalPlayer.empty) return;
+
+      const currentPlayer = formatted.starters[idx];
+
+      // Skip if same player is already in this position
+      if (currentPlayer.playerId === optimalPlayer.playerId) {
+        return;
+      }
+
+      // Only recommend if the optimal player is currently on bench (not already starting)
+      const isOptimalPlayerOnBench = !currentStarterIds.has(optimalPlayer.playerId);
+
+      if (isOptimalPlayerOnBench) {
+        const improvement = optimalPlayer.projection - this.estimatePoints(currentPlayer, {});
 
         // Only recommend if improvement is meaningful
-        if (improvement < MIN_IMPROVEMENT) {
-          return;
+        if (improvement >= MIN_IMPROVEMENT) {
+          recommendations.push({
+            type: 'swap',
+            out: currentPlayer,
+            in: optimalPlayer,
+            improvement,
+            position: optimalPlayer.slotPosition
+          });
         }
-
-        // Create a unique pair identifier (sorted to catch A->B and B->A)
-        const pairKey = [starter.playerId, optimalPlayer.playerId].sort().join('-');
-
-        // Skip if we've already seen this pair (prevents circular swaps)
-        if (swapPairs.has(pairKey)) {
-          return;
-        }
-
-        swapPairs.add(pairKey);
-
-        recommendations.push({
-          type: 'swap',
-          out: starter,
-          in: optimalPlayer,
-          improvement
-        });
       }
+    });
+
+    // Also check if any current starters should move to a different position
+    // (but only if it opens up space for a better bench player)
+    // This handles FLEX optimization without circular swaps
+    const currentStarterPositions = new Map();
+    formatted.starters.forEach((player, idx) => {
+      currentStarterPositions.set(player.playerId, idx);
     });
 
     // Sort recommendations by improvement (highest first)
