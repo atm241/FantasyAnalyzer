@@ -46,9 +46,18 @@ export class DisplayFormatter {
       console.log('\n' + chalk.bold.red('RECOMMENDED CHANGES:'));
 
       analysis.recommendations.forEach((rec, idx) => {
-        console.log(`\n${idx + 1}. ${chalk.red('Bench:')} ${rec.out.name} (${rec.out.position})`);
-        console.log(`   ${chalk.green('Start:')} ${rec.in.name} (${rec.in.position})`);
-        console.log(`   ${chalk.yellow('Improvement:')} +${rec.improvement.toFixed(1)} points`);
+        if (rec.type === 'swap') {
+          // Bench-to-starter swap
+          console.log(`\n${idx + 1}. ${chalk.red('Bench:')} ${rec.out.name} (${rec.out.position})`);
+          console.log(`   ${chalk.green('Start:')} ${rec.in.name} (${rec.in.position})`);
+          console.log(`   ${chalk.yellow('Improvement:')} +${rec.improvement.toFixed(1)} points`);
+        } else if (rec.type === 'position_swap') {
+          // Position swap between two starters
+          console.log(`\n${idx + 1}. ${chalk.blue('Move:')} ${rec.player.name} (${rec.player.position})`);
+          console.log(`   ${chalk.yellow('From:')} ${rec.fromSlot} → ${chalk.yellow('To:')} ${rec.toSlot}`);
+          console.log(`   ${chalk.gray('This allows:')} ${rec.affectedPlayer.name} to fill the ${rec.fromSlot} slot`);
+          console.log(`   ${chalk.yellow('Improvement:')} +${rec.improvement.toFixed(1)} points`);
+        }
       });
     } else {
       console.log(chalk.bold.green('\n✓ Your lineup is already optimal!'));

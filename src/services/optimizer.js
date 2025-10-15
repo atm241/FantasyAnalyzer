@@ -186,8 +186,13 @@ export class LineupOptimizer {
     const currentStarterIds = new Set(formatted.starters.map(p => p.playerId));
     const optimalStarterIds = new Set(optimal.lineup.filter(p => !p.empty).map(p => p.playerId));
 
-    // Find players who should be moved from bench to starting
-    // These are players in optimal lineup but currently on bench
+    // Build a map of player positions in current lineup
+    const currentPlayerPositions = new Map();
+    formatted.starters.forEach((player, idx) => {
+      currentPlayerPositions.set(player.playerId, { player, index: idx, position: player.position });
+    });
+
+    // Find all differences between current and optimal lineup
     optimal.lineup.forEach((optimalPlayer, idx) => {
       if (optimalPlayer.empty) return;
 
@@ -198,13 +203,14 @@ export class LineupOptimizer {
         return;
       }
 
-      // Only recommend if the optimal player is currently on bench (not already starting)
       const isOptimalPlayerOnBench = !currentStarterIds.has(optimalPlayer.playerId);
+      const isOptimalPlayerInDifferentSlot = currentStarterIds.has(optimalPlayer.playerId) &&
+                                              currentPlayer.playerId !== optimalPlayer.playerId;
 
       if (isOptimalPlayerOnBench) {
+        // Case 1: Bench player should start
         const improvement = optimalPlayer.projection - this.estimatePoints(currentPlayer, {});
 
-        // Only recommend if improvement is meaningful
         if (improvement >= MIN_IMPROVEMENT) {
           recommendations.push({
             type: 'swap',
@@ -214,15 +220,37 @@ export class LineupOptimizer {
             position: optimalPlayer.slotPosition
           });
         }
-      }
-    });
+      } else if (isOptimalPlayerInDifferentSlot) {
+        // Case 2: Starting player should move to different position
+        const currentPosition = currentPlayerPositions.get(optimalPlayer.playerId);
 
-    // Also check if any current starters should move to a different position
-    // (but only if it opens up space for a better bench player)
-    // This handles FLEX optimization without circular swaps
-    const currentStarterPositions = new Map();
-    formatted.starters.forEach((player, idx) => {
-      currentStarterPositions.set(player.playerId, idx);
+        // Calculate the improvement from this position swap
+        // This is a position optimization - both players are already starting
+        const optimalPlayerInNewSlot = optimalPlayer.projection;
+        const currentPlayerInThisSlot = this.estimatePoints(currentPlayer, {});
+
+        // Find what player is taking the optimal player's old slot
+        const playerTakingOldSlot = optimal.lineup[currentPosition.index];
+        const playerTakingOldSlotProjection = playerTakingOldSlot ? playerTakingOldSlot.projection : 0;
+        const optimalPlayerInOldSlot = this.estimatePoints(optimalPlayer, {});
+
+        // Net improvement from swapping positions
+        const improvement = (optimalPlayerInNewSlot - currentPlayerInThisSlot) +
+                           (playerTakingOldSlotProjection - optimalPlayerInOldSlot);
+
+        if (improvement >= MIN_IMPROVEMENT) {
+          recommendations.push({
+            type: 'position_swap',
+            player: optimalPlayer,
+            fromPosition: currentPosition.index,
+            toPosition: idx,
+            fromSlot: formatted.starters[currentPosition.index].slotPosition || currentPosition.player.position,
+            toSlot: optimalPlayer.slotPosition,
+            improvement,
+            affectedPlayer: currentPlayer
+          });
+        }
+      }
     });
 
     // Sort recommendations by improvement (highest first)

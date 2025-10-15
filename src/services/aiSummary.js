@@ -58,12 +58,23 @@ export class AISummaryService {
       });
 
       lineupAnalysis.recommendations.forEach(rec => {
-        summary.lineupChanges.push({
-          bench: `${rec.out.name} (${rec.out.position})`,
-          start: `${rec.in.name} (${rec.in.position})`,
-          improvement: `+${rec.improvement.toFixed(1)} pts`,
-          reason: rec.out.onBye ? 'On BYE' : rec.out.injuryStatus ? `Injured: ${rec.out.injuryStatus}` : 'Better matchup'
-        });
+        if (rec.type === 'swap') {
+          // Bench-to-starter swap
+          summary.lineupChanges.push({
+            bench: `${rec.out.name} (${rec.out.position})`,
+            start: `${rec.in.name} (${rec.in.position})`,
+            improvement: `+${rec.improvement.toFixed(1)} pts`,
+            reason: rec.out.onBye ? 'On BYE' : rec.out.injuryStatus ? `Injured: ${rec.out.injuryStatus}` : 'Better matchup'
+          });
+        } else if (rec.type === 'position_swap') {
+          // Position swap between two starters
+          summary.lineupChanges.push({
+            bench: `${rec.player.name} at ${rec.fromSlot}`,
+            start: `${rec.player.name} at ${rec.toSlot}`,
+            improvement: `+${rec.improvement.toFixed(1)} pts`,
+            reason: 'Position optimization'
+          });
+        }
       });
     }
 
