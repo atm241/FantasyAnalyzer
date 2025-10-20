@@ -118,7 +118,8 @@ export class LineupOptimizer {
     const allPlayers = roster.starters.concat(roster.bench);
     const playersWithProjections = allPlayers.map(player => ({
       ...player,
-      projection: this.estimatePoints(player, scoringSettings)
+      // Use real projection if available, otherwise estimate
+      projection: player.realProjection ?? this.estimatePoints(player, scoringSettings)
     }));
 
     // Sort by projection (highest first)
@@ -174,9 +175,9 @@ export class LineupOptimizer {
     const formatted = await this.rosterService.formatRoster(currentRoster);
     const optimal = await this.optimizeLineup(leagueId, formatted);
 
-    // Calculate current lineup points
+    // Calculate current lineup points (use real projections if available)
     const currentPoints = formatted.starters.reduce((sum, player) => {
-      return sum + this.estimatePoints(player, {});
+      return sum + (player.realProjection ?? this.estimatePoints(player, {}));
     }, 0);
 
     const recommendations = [];
@@ -209,12 +210,13 @@ export class LineupOptimizer {
 
       if (isOptimalPlayerOnBench) {
         // Case 1: Bench player should start
-        const improvement = optimalPlayer.projection - this.estimatePoints(currentPlayer, {});
+        const currentPlayerProjection = currentPlayer.realProjection ?? this.estimatePoints(currentPlayer, {});
+        const improvement = optimalPlayer.projection - currentPlayerProjection;
 
         if (improvement >= MIN_IMPROVEMENT) {
           recommendations.push({
             type: 'swap',
-            out: currentPlayer,
+            out: { ...currentPlayer, projection: currentPlayerProjection },
             in: optimalPlayer,
             improvement,
             position: optimalPlayer.slotPosition
@@ -227,12 +229,13 @@ export class LineupOptimizer {
         // Calculate the improvement from this position swap
         // This is a position optimization - both players are already starting
         const optimalPlayerInNewSlot = optimalPlayer.projection;
-        const currentPlayerInThisSlot = this.estimatePoints(currentPlayer, {});
+        const currentPlayerProjection = currentPlayer.realProjection ?? this.estimatePoints(currentPlayer, {});
+        const currentPlayerInThisSlot = currentPlayerProjection;
 
         // Find what player is taking the optimal player's old slot
         const playerTakingOldSlot = optimal.lineup[currentPosition.index];
         const playerTakingOldSlotProjection = playerTakingOldSlot ? playerTakingOldSlot.projection : 0;
-        const optimalPlayerInOldSlot = this.estimatePoints(optimalPlayer, {});
+        const optimalPlayerInOldSlot = optimalPlayer.projection;
 
         // Net improvement from swapping positions
         const improvement = (optimalPlayerInNewSlot - currentPlayerInThisSlot) +

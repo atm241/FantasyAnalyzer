@@ -62,7 +62,9 @@ export class AISummaryService {
           // Bench-to-starter swap
           summary.lineupChanges.push({
             bench: `${rec.out.name} (${rec.out.position})`,
+            benchProjection: rec.out.projection || 0,
             start: `${rec.in.name} (${rec.in.position})`,
+            startProjection: rec.in.projection || 0,
             improvement: `+${rec.improvement.toFixed(1)} pts`,
             reason: rec.out.onBye ? 'On BYE' : rec.out.injuryStatus ? `Injured: ${rec.out.injuryStatus}` : 'Better matchup'
           });
@@ -70,7 +72,9 @@ export class AISummaryService {
           // Position swap between two starters
           summary.lineupChanges.push({
             bench: `${rec.player.name} at ${rec.fromSlot}`,
+            benchProjection: null,
             start: `${rec.player.name} at ${rec.toSlot}`,
+            startProjection: rec.player.projection || 0,
             improvement: `+${rec.improvement.toFixed(1)} pts`,
             reason: 'Position optimization'
           });
@@ -178,7 +182,13 @@ export class AISummaryService {
       lines.push('🔄 RECOMMENDED LINEUP CHANGES:');
       summary.lineupChanges.forEach((change, idx) => {
         lines.push(`\n${idx + 1}. BENCH: ${change.bench}`);
+        if (change.benchProjection !== null) {
+          lines.push(`          Proj: ${change.benchProjection.toFixed(1)} pts`);
+        }
         lines.push(`   START:  ${change.start} (${change.improvement})`);
+        if (change.startProjection !== null) {
+          lines.push(`          Proj: ${change.startProjection.toFixed(1)} pts`);
+        }
         if (change.reason) {
           lines.push(`   Reason: ${change.reason}`);
         }

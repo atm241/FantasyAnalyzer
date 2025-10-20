@@ -64,7 +64,8 @@ export class RosterService {
         status: player?.status || 'Active',
         injuryStatus: player?.injury_status || null,
         onBye: isOnBye(team, currentWeek),
-        byeWeek: getByeWeek(team)
+        byeWeek: getByeWeek(team),
+        realProjection: player?.projected_points || null
       };
     });
 
@@ -81,7 +82,8 @@ export class RosterService {
           status: player?.status || 'Active',
           injuryStatus: player?.injury_status || null,
           onBye: isOnBye(team, currentWeek),
-          byeWeek: getByeWeek(team)
+          byeWeek: getByeWeek(team),
+          realProjection: player?.projected_points || null
         };
       });
 

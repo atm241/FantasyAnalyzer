@@ -49,7 +49,13 @@ export class DisplayFormatter {
         if (rec.type === 'swap') {
           // Bench-to-starter swap
           console.log(`\n${idx + 1}. ${chalk.red('Bench:')} ${rec.out.name} (${rec.out.position})`);
+          if (rec.out.projection !== undefined) {
+            console.log(`          ${chalk.gray('Projected:')} ${rec.out.projection.toFixed(1)} pts`);
+          }
           console.log(`   ${chalk.green('Start:')} ${rec.in.name} (${rec.in.position})`);
+          if (rec.in.projection !== undefined) {
+            console.log(`          ${chalk.gray('Projected:')} ${rec.in.projection.toFixed(1)} pts`);
+          }
           console.log(`   ${chalk.yellow('Improvement:')} +${rec.improvement.toFixed(1)} points`);
         } else if (rec.type === 'position_swap') {
           // Position swap between two starters
