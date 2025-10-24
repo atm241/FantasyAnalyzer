@@ -71,7 +71,7 @@ export class EspnAPI {
 
   /**
    * Get current NFL week (approximate from current date)
-   * On Tuesdays or later in the week, projects for the next week
+   * Shows current week until Tuesday, then switches to next week for lineup planning
    */
   async getNFLState() {
     // ESPN doesn't have this endpoint, calculate based on season start
@@ -86,9 +86,10 @@ export class EspnAPI {
     const weeksSinceStart = Math.floor((now - seasonStart) / (7 * 24 * 60 * 60 * 1000)) + 1;
     let currentWeek = Math.min(weeksSinceStart, 18);
 
-    // If it's Tuesday or later (day 2-6, where 0=Sunday), project for next week
+    // Starting Tuesday (day 2), show next week's projections for lineup planning
+    // Sunday=0, Monday=1, Tuesday=2, etc.
     const dayOfWeek = now.getDay();
-    if (dayOfWeek >= 2 && dayOfWeek <= 6) { // Tuesday through Saturday
+    if (dayOfWeek >= 2) {
       currentWeek = Math.min(currentWeek + 1, 18);
     }
 
