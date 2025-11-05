@@ -71,27 +71,35 @@ export class EspnAPI {
 
   /**
    * Get current NFL week (approximate from current date)
-   * Shows current week until Tuesday, then switches to next week for lineup planning
+   * Shows the current NFL week based on which games are upcoming
+   * On Tuesday or later, advances to next week for lineup planning
    */
   async getNFLState() {
     // ESPN doesn't have this endpoint, calculate based on season start
     const now = new Date();
-    const seasonStart = new Date('2024-09-05'); // 2024 NFL season started Thursday, Sept 5
-    const season = '2024';
+    const seasonStart = new Date('2025-09-04'); // 2025 NFL season starts first Thursday of September
+    const season = '2025';
 
     if (now < seasonStart) {
       return { week: 1, season, season_type: 'pre' };
     }
 
-    const weeksSinceStart = Math.floor((now - seasonStart) / (7 * 24 * 60 * 60 * 1000)) + 1;
-    let currentWeek = Math.min(weeksSinceStart, 18);
+    // Calculate week - each Thursday starts a new NFL week
+    // But we want Tuesday to trigger next week's lineup planning
+    const daysSinceStart = Math.floor((now - seasonStart) / (24 * 60 * 60 * 1000));
+    const dayOfWeek = now.getDay(); // 0=Sun, 1=Mon, 2=Tue, etc.
 
-    // Starting Tuesday (day 2), show next week's projections for lineup planning
-    // Sunday=0, Monday=1, Tuesday=2, etc.
-    const dayOfWeek = now.getDay();
+    // Adjust to treat Tuesday as start of planning week
+    // If Sun/Mon, we're looking at current week
+    // If Tue-Sat, we're planning for next week
+    let adjustedDays = daysSinceStart;
     if (dayOfWeek >= 2) {
-      currentWeek = Math.min(currentWeek + 1, 18);
+      // It's Tuesday or later - plan for next week
+      // Add days to push into next week calculation
+      adjustedDays += 7;
     }
+
+    const currentWeek = Math.min(Math.floor(adjustedDays / 7) + 1, 18);
 
     return {
       week: currentWeek,
