@@ -263,20 +263,34 @@ export class TradeAnalyzer {
         }))
         .sort((a, b) => b.tradeValue - a.tradeValue);
 
-      if (yourPositionPlayers.length < 3) continue;
+      // Need at least 2 players at position to trade one away safely
+      if (yourPositionPlayers.length < 2) continue;
 
       // Offer your 2nd or 3rd best (keep your #1, don't trade worst)
-      const playerToOffer = yourPositionPlayers[1] || yourPositionPlayers[2];
+      // For positions with only 2 players, offer the 2nd best if they still have decent value
+      let playerToOffer;
+      if (yourPositionPlayers.length >= 3) {
+        playerToOffer = yourPositionPlayers[1] || yourPositionPlayers[2];
+      } else if (yourPositionPlayers.length === 2) {
+        // Only offer 2nd player if they have tradeable value and you're deep enough
+        playerToOffer = yourPositionPlayers[1].tradeValue >= 40 ? yourPositionPlayers[1] : null;
+      }
+
       if (!playerToOffer || playerToOffer.tradeValue < 30) continue;
 
-      // Find positions where they have surplus and you have deficit
-      const returnPositions = Object.keys(theirNeeds.surplus).filter(pos =>
+      // Find positions where they have surplus and you have deficit (ideal)
+      let returnPositions = Object.keys(theirNeeds.surplus).filter(pos =>
         yourNeeds.deficit[pos]
       );
 
+      // If no perfect match, look for any position where they have surplus
       if (returnPositions.length === 0) {
-        // If no direct swap, look for any position where they're strong
-        returnPositions.push(...Object.keys(theirNeeds.surplus));
+        returnPositions = Object.keys(theirNeeds.surplus);
+      }
+
+      // If they still have no surplus, look at ALL their positions (less ideal but workable)
+      if (returnPositions.length === 0) {
+        returnPositions = ['QB', 'RB', 'WR', 'TE'];
       }
 
       // Get their players at return positions
@@ -294,35 +308,36 @@ export class TradeAnalyzer {
           }))
           .sort((a, b) => b.tradeValue - a.tradeValue);
 
-        if (theirPositionPlayers.length < 2) continue;
+        // For positions with 2+ players, we can consider trading one
+        if (theirPositionPlayers.length < 1) continue;
 
-        // Find fair trades (value within 20% of each other)
+        // Find fair trades (value within 30% of each other for more flexibility)
         const yourValue = playerToOffer.tradeValue;
 
-        for (const theirPlayer of theirPositionPlayers.slice(0, 3)) {
+        for (const theirPlayer of theirPositionPlayers.slice(0, 4)) {
           const valueDiff = Math.abs(yourValue - theirPlayer.tradeValue);
           const valueRatio = valueDiff / Math.max(yourValue, theirPlayer.tradeValue);
 
           // If values are close, propose 1-for-1
-          if (valueRatio < 0.2) {
+          if (valueRatio < 0.3) {
             proposals.push(this.createTradeProposal(
               [playerToOffer],
               [theirPlayer],
               'Fair 1-for-1 swap'
             ));
           }
-          // If they're getting less value, add another player
-          else if (yourValue > theirPlayer.tradeValue * 1.3) {
+          // If you're giving more value, suggest getting 2 players
+          else if (yourValue > theirPlayer.tradeValue * 1.2) {
             const additionalPlayer = theirPositionPlayers.find(p =>
               p.playerId !== theirPlayer.playerId &&
-              (yourValue - (theirPlayer.tradeValue + p.tradeValue)) < yourValue * 0.15
+              Math.abs((theirPlayer.tradeValue + p.tradeValue) - yourValue) < yourValue * 0.2
             );
 
             if (additionalPlayer) {
               proposals.push(this.createTradeProposal(
                 [playerToOffer],
                 [theirPlayer, additionalPlayer],
-                'You get more value'
+                'You get 2 players for 1'
               ));
             }
           }
