@@ -8,10 +8,11 @@ import { WaiverAnalyzer } from './services/waivers.js';
 import { AISummaryService } from './services/aiSummary.js';
 import { FirstToGoAnalyzer } from './services/firstToGo.js';
 import { StandingsAnalyzer } from './services/standings.js';
+import { TradeAnalyzer } from './services/tradeAnalyzer.js';
 import { DisplayFormatter } from './display/formatter.js';
 import readline from 'readline';
 
-let api, rosterService, optimizer, waiverAnalyzer, aiSummary, firstToGo, standings;
+let api, rosterService, optimizer, waiverAnalyzer, aiSummary, firstToGo, standings, tradeAnalyzer;
 const display = new DisplayFormatter();
 
 /**
@@ -216,6 +217,14 @@ async function runAnalyzer(username, leagueId) {
     console.log(firstToGo.formatFirstToGo(firstToGoAnalysis));
     console.log('='.repeat(70) + '\n');
 
+    // Analyze trade opportunities
+    display.displayInfo('Finding trade partners based on team needs...');
+    const tradeMatches = await tradeAnalyzer.findTradeMatches(formatted, league.league_id, user.user_id);
+    const yourNeeds = tradeAnalyzer.calculateTeamNeeds(formatted);
+    console.log('\n' + '='.repeat(70));
+    console.log(tradeAnalyzer.formatTradeAnalysis(tradeMatches, yourNeeds));
+    console.log('='.repeat(70) + '\n');
+
     // Generate AI summary and recommendations
     display.displayInfo('Generating strategic recommendations...');
     const summary = await aiSummary.generateTeamSummary(
@@ -291,6 +300,7 @@ program
     aiSummary = new AISummaryService(rosterService);
     firstToGo = new FirstToGoAnalyzer(rosterService);
     standings = new StandingsAnalyzer(api, rosterService);
+    tradeAnalyzer = new TradeAnalyzer(rosterService);
 
     await runAnalyzer(options.username, options.league);
   });
