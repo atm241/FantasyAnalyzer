@@ -60,7 +60,7 @@ export class LineupOptimizer {
 
     // Good tier players (1.1-1.2x multiplier)
     const goodPlayers = [
-      'tony pollard', 'rachaad white', 'devin singletary', 'chuba hubbard',
+      'tony pollard', 'devin singletary', 'rico dowdle', 'bucky irving',
       'courtland sutton', 'dj moore', 'george pickens', 'josh downs',
       'jayden reed', 'drake london', 'zay flowers', 'brian thomas',
       'jonnu smith', 'dalton schultz', 'cole kmet', 'david njoku'
@@ -68,10 +68,17 @@ export class LineupOptimizer {
 
     // Below average tier (0.7-0.8x multiplier) - backups, bad situations
     const belowAverage = [
+      // Backup RBs
       'jerome ford', 'justice hill', 'roschon johnson', 'tyjae spears',
       'elijah mitchell', 'ty chandler', 'alexander mattison', 'jaleel mclaughlin',
+      'bhayshul tuten', 'miles sanders', 'dameon pierce', 'zamir white',
+      'antonio gibson', 'ronnie rivers', 'pierre strong', 'hassan haskins',
+      'kendre miller', 'evan hull', 'joshua kelley', 'clyde edwards-helaire',
+      'rachaad white', 'chuba hubbard', 'tyler allgeier', 'ray davis',
+      // Backup/WR3-4 receivers
       'tre tucker', 'josh reynolds', 'michael wilson', 'romeo doubs',
-      'calvin austin', 'jalen tolbert', 'tyler boyd', 'kendrick bourne'
+      'calvin austin', 'jalen tolbert', 'tyler boyd', 'kendrick bourne',
+      'jalen mcmillan', 'ray-ray mccloud', 'marvin mims', 'tutu atwell'
     ];
 
     // Bad offense teams get penalty
@@ -98,8 +105,14 @@ export class LineupOptimizer {
 
     // Backup RBs and WR3+ get further penalty if not elite
     if (position === 'RB' && multiplier < 1.1) {
-      // Additional penalty for known backups
-      if (name.includes('hill') || name.includes('ford') || name.includes('mattison')) {
+      // Additional penalty for known backups (common backup RB name patterns)
+      const backupPatterns = [
+        'hill', 'ford', 'mattison', 'tuten', 'spears', 'chandler',
+        'mitchell', 'sanders', 'pierce', 'white', 'gibson', 'rivers',
+        'strong', 'haskins', 'miller', 'hull', 'kelley', 'edwards-helaire',
+        'mclaughlin', 'johnson', 'hubbard', 'allgeier', 'davis'
+      ];
+      if (backupPatterns.some(pattern => name.includes(pattern))) {
         multiplier *= 0.8;
       }
     }

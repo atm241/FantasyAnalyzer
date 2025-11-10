@@ -103,6 +103,10 @@ async function runAnalyzer(username, leagueId) {
 
     display.displaySuccess(`Analyzing league: ${league.name}`);
 
+    // Get and display current week
+    const currentWeek = await rosterService.getCurrentWeek();
+    display.displayInfo(`Analyzing Week ${currentWeek}`);
+
     // For ESPN, find the user's team by matching username/team name
     if (api.platform === 'espn') {
       const users = await api.getLeagueUsers(league.league_id);
@@ -207,7 +211,6 @@ async function runAnalyzer(username, leagueId) {
 
     // Analyze First to Go (droppable/tradeable players)
     display.displayInfo('Analyzing droppable and tradeable players...');
-    const currentWeek = await rosterService.getCurrentWeek();
     const firstToGoAnalysis = await firstToGo.analyzeFirstToGo(formatted, currentWeek);
     console.log('\n' + '='.repeat(70));
     console.log(firstToGo.formatFirstToGo(firstToGoAnalysis));

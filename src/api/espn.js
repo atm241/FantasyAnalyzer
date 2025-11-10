@@ -77,7 +77,7 @@ export class EspnAPI {
   async getNFLState() {
     // ESPN doesn't have this endpoint, calculate based on season start
     const now = new Date();
-    const seasonStart = new Date('2025-09-04'); // 2025 NFL season starts first Thursday of September
+    const seasonStart = new Date('2025-09-04'); // 2025 NFL season starts Thursday, Sept 4
     const season = '2025';
 
     if (now < seasonStart) {
