@@ -1,3 +1,6 @@
+import { ROSTER_POSITION_VALUE } from '../data/scoringConstants.js';
+import { WEAK_OFFENSES } from '../data/teamRankings.js';
+
 /**
  * Identify players to drop or trade
  */
@@ -18,15 +21,7 @@ export class FirstToGoAnalyzer {
     }
 
     // Position scarcity
-    const positionValue = {
-      'QB': 15,
-      'RB': 20,
-      'WR': 15,
-      'TE': 18,
-      'K': 5,
-      'DEF': 5
-    };
-    score += positionValue[player.position] || 0;
+    score += ROSTER_POSITION_VALUE[player.position] || 0;
 
     // Deep positions are less valuable
     if (positionDepth[player.position] > 4) {
@@ -40,8 +35,7 @@ export class FirstToGoAnalyzer {
     if (player.injuryStatus === 'Questionable') score -= 5;
 
     // Team quality (players on bad teams less valuable)
-    const weakTeams = ['CAR', 'NYG', 'TEN', 'NE', 'LV', 'JAX'];
-    if (weakTeams.includes(player.team)) {
+    if (WEAK_OFFENSES.includes(player.team)) {
       score -= 10;
     }
 
@@ -146,8 +140,7 @@ export class FirstToGoAnalyzer {
       reasons.push(`Deep at ${player.position} (${positionDepth[player.position]} total)`);
     }
 
-    const weakTeams = ['CAR', 'NYG', 'TEN', 'NE', 'LV', 'JAX'];
-    if (weakTeams.includes(player.team)) {
+    if (WEAK_OFFENSES.includes(player.team)) {
       reasons.push('Weak offense');
     }
 

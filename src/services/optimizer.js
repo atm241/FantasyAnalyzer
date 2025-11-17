@@ -1,3 +1,6 @@
+import { getBasePoints, getInjuryMultiplier } from '../data/scoringConstants.js';
+import { ELITE_OFFENSES, WEAK_OFFENSES, TEAM_MULTIPLIERS } from '../data/teamRankings.js';
+
 /**
  * Lineup optimizer using projections and scoring rules
  */
@@ -10,28 +13,16 @@ export class LineupOptimizer {
    * Enhanced projection model with player quality tiers
    */
   estimatePoints(player, scoringSettings) {
-    // Base points by position
-    const basePoints = {
-      'QB': 18,
-      'RB': 12,
-      'WR': 11,
-      'TE': 9,
-      'K': 8,
-      'DEF': 8
-    };
-
-    let points = basePoints[player.position] || 0;
-
     // Players on BYE get 0 points
     if (player.onBye) {
       return 0;
     }
 
-    // Reduce points for injured/questionable players
-    if (player.injuryStatus === 'Out') points = 0;
-    if (player.injuryStatus === 'Doubtful') points *= 0.2;
-    if (player.injuryStatus === 'Questionable') points *= 0.7;
-    if (player.injuryStatus === 'IR') points = 0;
+    // Get base points for position
+    let points = getBasePoints(player.position);
+
+    // Apply injury multiplier
+    points *= getInjuryMultiplier(player.injuryStatus);
 
     // Apply player quality modifiers based on tier
     points *= this.getPlayerQualityMultiplier(player);
@@ -81,10 +72,6 @@ export class LineupOptimizer {
       'jalen mcmillan', 'ray-ray mccloud', 'marvin mims', 'tutu atwell'
     ];
 
-    // Bad offense teams get penalty
-    const weakOffenses = ['CAR', 'NE', 'TEN', 'NYG', 'LV', 'JAX', 'CHI'];
-    const goodOffenses = ['KC', 'SF', 'BAL', 'BUF', 'MIA', 'DAL', 'PHI', 'DET'];
-
     let multiplier = 1.0;
 
     // Check player tier
@@ -97,10 +84,10 @@ export class LineupOptimizer {
     }
 
     // Team quality modifier
-    if (weakOffenses.includes(team)) {
-      multiplier *= 0.85;
-    } else if (goodOffenses.includes(team)) {
-      multiplier *= 1.1;
+    if (WEAK_OFFENSES.includes(team)) {
+      multiplier *= TEAM_MULTIPLIERS.WEAK;
+    } else if (ELITE_OFFENSES.includes(team)) {
+      multiplier *= TEAM_MULTIPLIERS.ELITE;
     }
 
     // Backup RBs and WR3+ get further penalty if not elite

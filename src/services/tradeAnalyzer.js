@@ -1,3 +1,6 @@
+import { POSITION_SCARCITY, getBasePoints } from '../data/scoringConstants.js';
+import { ELITE_OFFENSES, WEAK_OFFENSES, TEAM_MULTIPLIERS } from '../data/teamRankings.js';
+
 /**
  * Analyze trade opportunities by matching team needs
  */
@@ -11,6 +14,10 @@ export class TradeAnalyzer {
    * Returns surplus (excess) and deficit (need) positions
    */
   calculateTeamNeeds(roster) {
+    if (!roster || !roster.starters || !roster.bench) {
+      return { surplus: {}, deficit: {}, positionDepth: {} };
+    }
+
     const positionDepth = {};
     const allPlayers = [...roster.starters, ...roster.bench];
 
@@ -64,15 +71,7 @@ export class TradeAnalyzer {
     if (isStarter) value += 25;
 
     // Position scarcity multiplier
-    const scarcityValue = {
-      'QB': 1.0,
-      'RB': 1.3,  // RBs more valuable due to scarcity
-      'WR': 1.1,
-      'TE': 1.2,
-      'K': 0.3,
-      'DEF': 0.3
-    };
-    value *= (scarcityValue[player.position] || 1.0);
+    value *= (POSITION_SCARCITY[player.position] || 1.0);
 
     // Injury penalty
     if (player.injuryStatus === 'Out') value *= 0.3;
@@ -84,11 +83,8 @@ export class TradeAnalyzer {
     if (player.onBye) value *= 0.95;
 
     // Team quality bonus/penalty
-    const eliteOffenses = ['KC', 'SF', 'BAL', 'BUF', 'MIA', 'DAL', 'PHI', 'DET'];
-    const weakOffenses = ['CAR', 'NE', 'TEN', 'NYG', 'LV', 'JAX', 'CHI'];
-
-    if (eliteOffenses.includes(player.team)) value *= 1.15;
-    if (weakOffenses.includes(player.team)) value *= 0.85;
+    if (ELITE_OFFENSES.includes(player.team)) value *= TEAM_MULTIPLIERS.ELITE;
+    if (WEAK_OFFENSES.includes(player.team)) value *= TEAM_MULTIPLIERS.WEAK;
 
     return Math.round(value);
   }
@@ -380,34 +376,14 @@ export class TradeAnalyzer {
    */
   estimateRestOfSeasonPoints(player, weeksRemaining = 8) {
     // Base weekly points by position
-    const basePoints = {
-      'QB': 18,
-      'RB': 12,
-      'WR': 11,
-      'TE': 9,
-      'K': 8,
-      'DEF': 8
-    };
+    let weeklyPoints = getBasePoints(player.position);
 
-    let weeklyPoints = basePoints[player.position] || 0;
-
-    // Apply quality multiplier (similar to optimizer)
-    const scarcityValue = {
-      'QB': 1.0,
-      'RB': 1.3,
-      'WR': 1.1,
-      'TE': 1.2,
-      'K': 0.3,
-      'DEF': 0.3
-    };
-    weeklyPoints *= (scarcityValue[player.position] || 1.0);
+    // Apply position scarcity multiplier
+    weeklyPoints *= (POSITION_SCARCITY[player.position] || 1.0);
 
     // Team quality
-    const eliteOffenses = ['KC', 'SF', 'BAL', 'BUF', 'MIA', 'DAL', 'PHI', 'DET'];
-    const weakOffenses = ['CAR', 'NE', 'TEN', 'NYG', 'LV', 'JAX', 'CHI'];
-
-    if (eliteOffenses.includes(player.team)) weeklyPoints *= 1.15;
-    if (weakOffenses.includes(player.team)) weeklyPoints *= 0.85;
+    if (ELITE_OFFENSES.includes(player.team)) weeklyPoints *= TEAM_MULTIPLIERS.ELITE;
+    if (WEAK_OFFENSES.includes(player.team)) weeklyPoints *= TEAM_MULTIPLIERS.WEAK;
 
     // Injury penalty
     if (player.injuryStatus === 'Out') weeklyPoints *= 0.3;

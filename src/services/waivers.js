@@ -1,3 +1,6 @@
+import { POSITION_VALUE, isPlayerLikelyOut } from '../data/scoringConstants.js';
+import { ELITE_OFFENSES } from '../data/teamRankings.js';
+
 /**
  * Waiver wire analysis and recommendations
  */
@@ -11,6 +14,10 @@ export class WaiverAnalyzer {
    * Score a player's waiver value (0-100)
    */
   scorePlayer(player, trending = false) {
+    if (!player || typeof player !== 'object') {
+      return 0;
+    }
+
     let score = 50; // Base score
 
     // Players on BYE get reduced score
@@ -18,16 +25,8 @@ export class WaiverAnalyzer {
       score -= 15;
     }
 
-    // Position value (QB, RB, WR typically more valuable)
-    const positionValue = {
-      'QB': 10,
-      'RB': 15,
-      'WR': 12,
-      'TE': 8,
-      'K': 2,
-      'DEF': 5
-    };
-    score += positionValue[player.position] || 0;
+    // Position value
+    score += POSITION_VALUE[player.position] || 0;
 
     // Active and healthy players get bonus
     if (player.status === 'Active' && !player.injuryStatus && !player.onBye) {
@@ -37,7 +36,7 @@ export class WaiverAnalyzer {
     // Injury penalties
     if (player.injuryStatus === 'Questionable') score -= 5;
     if (player.injuryStatus === 'Doubtful') score -= 15;
-    if (player.injuryStatus === 'Out' || player.injuryStatus === 'IR') score -= 30;
+    if (isPlayerLikelyOut(player.injuryStatus)) score -= 30;
 
     // Trending bonus
     if (trending) {
@@ -45,8 +44,7 @@ export class WaiverAnalyzer {
     }
 
     // Team matters (players on good teams score more)
-    const goodTeams = ['KC', 'SF', 'BAL', 'BUF', 'DAL', 'MIA', 'PHI', 'DET'];
-    if (goodTeams.includes(player.team)) {
+    if (ELITE_OFFENSES.includes(player.team)) {
       score += 5;
     }
 
@@ -116,12 +114,14 @@ export class WaiverAnalyzer {
       }
     }
 
+    // Get trending data once (performance optimization - avoid repeated API calls)
+    const trending = await this.api.getTrendingPlayers('add', 24).catch(() => []);
+    const trendingIds = new Set(trending.map(t => t.player_id));
+
     // Get top available for weak positions
     const targetedPickups = {};
     for (const weakness of weakPositions) {
       const available = await this.rosterService.getAvailablePlayers(leagueId, weakness.position);
-      const trending = await this.api.getTrendingPlayers('add', 24);
-      const trendingIds = new Set(trending.map(t => t.player_id));
 
       const scored = available.map(player => ({
         ...player,
