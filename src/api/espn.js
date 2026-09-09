@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { getCurrentSeasonYear, getSeasonStartDate } from '../data/season.js';
 
 const ESPN_BASE_URL = 'https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons';
 
@@ -13,7 +14,7 @@ export class EspnAPI {
   /**
    * Get league data
    */
-  async getLeague(leagueId, seasonId = 2025, cookies = {}) {
+  async getLeague(leagueId, seasonId = getCurrentSeasonYear(), cookies = {}) {
     const config = {
       params: {
         view: ['mSettings', 'mTeam', 'mRoster', 'mMatchup', 'mStandings']
@@ -77,8 +78,9 @@ export class EspnAPI {
   async getNFLState() {
     // ESPN doesn't have this endpoint, calculate based on season start
     const now = new Date();
-    const seasonStart = new Date('2025-09-04'); // 2025 NFL season starts Thursday, Sept 4
-    const season = '2025';
+    const seasonYear = getCurrentSeasonYear(now);
+    const seasonStart = getSeasonStartDate(seasonYear);
+    const season = seasonYear.toString();
 
     if (now < seasonStart) {
       return { week: 1, season, season_type: 'pre' };

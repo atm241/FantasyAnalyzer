@@ -10,6 +10,7 @@ import { FirstToGoAnalyzer } from './services/firstToGo.js';
 import { StandingsAnalyzer } from './services/standings.js';
 import { TradeAnalyzer } from './services/tradeAnalyzer.js';
 import { DisplayFormatter } from './display/formatter.js';
+import { getCurrentSeasonYear } from './data/season.js';
 import readline from 'readline';
 
 let api, rosterService, optimizer, waiverAnalyzer, aiSummary, firstToGo, standings, tradeAnalyzer;
@@ -255,7 +256,7 @@ program
   .option('-l, --league <leagueId>', 'League ID')
   .option('--espn-s2 <espnS2>', 'ESPN S2 cookie (for private leagues)')
   .option('--swid <swid>', 'ESPN SWID cookie (for private leagues)')
-  .option('-s, --season <season>', 'Season year (default: 2025)', '2025')
+  .option('-s, --season <season>', 'Season year (defaults to the current NFL season)', getCurrentSeasonYear().toString())
   .action(async (options) => {
     const platform = options.platform.toLowerCase();
 

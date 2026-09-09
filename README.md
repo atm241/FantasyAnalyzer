@@ -52,6 +52,29 @@ npm start -- --platform espn --league YOUR_LEAGUE_ID --espn-s2 "YOUR_ESPN_S2_COO
 4. Copy the values for `espn_s2` and `SWID`
 5. Use them in the command above
 
+## Testing
+
+```bash
+npm test
+```
+
+Runs an offline end-to-end harness (`test/pipeline.test.mjs`) that mocks the
+platform API and exercises every analysis service, so the pipeline can be
+checked without a live league or network access.
+
+## Season Data
+
+The season year and week are derived from the current date, so no yearly edit
+is needed for those. Bye weeks are taken from the value the platform API
+reports per player (Sleeper's `bye_week`), with `src/data/byeWeeks.js` as a
+fallback. That fallback table currently only holds the 2025 schedule; when a
+season is missing the tool warns and reports bye weeks as unknown rather than
+reusing a prior year's schedule. Add the current schedule to
+`BYE_WEEKS_BY_SEASON` for full coverage.
+
+Note that `src/data/teamRankings.js` (elite/weak offense lists used to nudge
+projections) is still hand-maintained 2025 data and should be refreshed.
+
 ## Platform Comparison
 
 | Feature | Sleeper | ESPN |

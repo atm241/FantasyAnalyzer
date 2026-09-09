@@ -16,7 +16,7 @@ npm start -- --platform espn --league YOUR_LEAGUE_ID --espn-s2 "YOUR_ESPN_S2" --
 
 ### On Desktop/Web Browser:
 1. Go to your ESPN Fantasy Football league
-2. Look at the URL: `https://fantasy.espn.com/football/team?leagueId=123456&seasonId=2025`
+2. Look at the URL: `https://fantasy.espn.com/football/team?leagueId=123456&seasonId=2026`
 3. Your League ID is the number after `leagueId=` (in this example: `123456`)
 
 ### On iOS (iPhone/iPad):
@@ -73,8 +73,8 @@ npm start -- --platform espn --league 123456 \
   --espn-s2 "AEBxdL...very_long_string...xyz123" \
   --swid "{12345678-1234-1234-1234-123456789012}"
 
-# Specify season year (default is 2025)
-npm start -- --platform espn --league 123456 --season 2024
+# Specify season year (defaults to the current NFL season)
+npm start -- --platform espn --league 123456 --season 2025
 ```
 
 ## Troubleshooting
@@ -85,7 +85,7 @@ npm start -- --platform espn --league 123456 --season 2024
 - Cookies expire after ~2 weeks, you may need to refresh them
 
 ### "No teams found"
-- Check that the season year is correct (use `--season 2025`)
+- Check that the season year is correct (override with `--season <year>` if needed)
 - Verify you have access to the league
 
 ### Getting team-specific data

@@ -1,4 +1,4 @@
-import { isOnBye, getByeWeek } from '../data/byeWeeks.js';
+import { getByeWeek } from '../data/byeWeeks.js';
 
 /**
  * Roster management and display
@@ -8,6 +8,17 @@ export class RosterService {
     this.api = api;
     this.players = null;
     this.currentWeek = null;
+    this.currentSeason = null;
+  }
+
+  /**
+   * Resolve a player's bye week, preferring the value the platform API reports
+   * over the local schedule table so the data stays correct year to year.
+   */
+  resolveByeWeek(player, team) {
+    const reported = Number(player?.bye_week);
+    if (Number.isInteger(reported) && reported > 0) return reported;
+    return getByeWeek(team, this.currentSeason);
   }
 
   /**
@@ -27,6 +38,7 @@ export class RosterService {
     if (!this.currentWeek) {
       const nflState = await this.api.getNFLState();
       this.currentWeek = nflState.week;
+      this.currentSeason = nflState.season;
     }
     return this.currentWeek;
   }
@@ -56,6 +68,7 @@ export class RosterService {
     const starters = roster.starters.map(playerId => {
       const player = this.getPlayer(playerId);
       const team = player?.team || 'FA';
+      const byeWeek = this.resolveByeWeek(player, team);
       return {
         playerId,
         name: player?.full_name || 'Unknown',
@@ -63,8 +76,8 @@ export class RosterService {
         team,
         status: player?.status || 'Active',
         injuryStatus: player?.injury_status || null,
-        onBye: isOnBye(team, currentWeek),
-        byeWeek: getByeWeek(team),
+        onBye: byeWeek === currentWeek,
+        byeWeek,
         realProjection: player?.projected_points || null
       };
     });
@@ -74,6 +87,7 @@ export class RosterService {
       .map(playerId => {
         const player = this.getPlayer(playerId);
         const team = player?.team || 'FA';
+        const byeWeek = this.resolveByeWeek(player, team);
         return {
           playerId,
           name: player?.full_name || 'Unknown',
@@ -81,8 +95,8 @@ export class RosterService {
           team,
           status: player?.status || 'Active',
           injuryStatus: player?.injury_status || null,
-          onBye: isOnBye(team, currentWeek),
-          byeWeek: getByeWeek(team),
+          onBye: byeWeek === currentWeek,
+          byeWeek,
           realProjection: player?.projected_points || null
         };
       });
@@ -112,6 +126,7 @@ export class RosterService {
           player.fantasy_positions?.length > 0 &&
           (!position || player.position === position)) {
         const team = player.team || 'FA';
+        const byeWeek = this.resolveByeWeek(player, team);
         available.push({
           playerId,
           name: player.full_name,
@@ -119,8 +134,8 @@ export class RosterService {
           team,
           status: player.status,
           injuryStatus: player.injury_status,
-          onBye: isOnBye(team, currentWeek),
-          byeWeek: getByeWeek(team)
+          onBye: byeWeek === currentWeek,
+          byeWeek
         });
       }
     }
