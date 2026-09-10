@@ -1,4 +1,5 @@
-import { isOnBye, getByeWeek } from '../data/byeWeeks.js';
+import { isOnBye, getByeWeek, loadSchedule } from '../data/nflSchedule.js';
+import { getPlayerName } from '../utils/playerName.js';
 
 /**
  * Roster management and display
@@ -7,7 +8,7 @@ export class RosterService {
   constructor(api) {
     this.api = api;
     this.players = null;
-    this.currentWeek = null;
+    this.nflState = null;
   }
 
   /**
@@ -21,14 +22,34 @@ export class RosterService {
   }
 
   /**
+   * Get and cache the current NFL state (week + season)
+   */
+  async getNFLState() {
+    if (!this.nflState) {
+      this.nflState = await this.api.getNFLState();
+    }
+    return this.nflState;
+  }
+
+  /**
    * Get current NFL week
    */
   async getCurrentWeek() {
-    if (!this.currentWeek) {
-      const nflState = await this.api.getNFLState();
-      this.currentWeek = nflState.week;
-    }
-    return this.currentWeek;
+    return (await this.getNFLState()).week;
+  }
+
+  /**
+   * Get current NFL season
+   */
+  async getCurrentSeason() {
+    return (await this.getNFLState()).season;
+  }
+
+  /**
+   * Make sure the current season's schedule (and therefore BYE weeks) is loaded
+   */
+  async ensureSchedule() {
+    await loadSchedule(await this.getCurrentSeason());
   }
 
   /**
@@ -51,6 +72,7 @@ export class RosterService {
    */
   async formatRoster(roster) {
     await this.loadPlayers();
+    await this.ensureSchedule();
     const currentWeek = await this.getCurrentWeek();
 
     const starters = roster.starters.map(playerId => {
@@ -58,7 +80,7 @@ export class RosterService {
       const team = player?.team || 'FA';
       return {
         playerId,
-        name: player?.full_name || 'Unknown',
+        name: getPlayerName(player),
         position: player?.position || 'N/A',
         team,
         status: player?.status || 'Active',
@@ -76,7 +98,7 @@ export class RosterService {
         const team = player?.team || 'FA';
         return {
           playerId,
-          name: player?.full_name || 'Unknown',
+          name: getPlayerName(player),
           position: player?.position || 'N/A',
           team,
           status: player?.status || 'Active',
@@ -95,6 +117,7 @@ export class RosterService {
    */
   async getAvailablePlayers(leagueId, position = null) {
     await this.loadPlayers();
+    await this.ensureSchedule();
     const currentWeek = await this.getCurrentWeek();
     const rosters = await this.api.getLeagueRosters(leagueId);
 
@@ -114,7 +137,7 @@ export class RosterService {
         const team = player.team || 'FA';
         available.push({
           playerId,
-          name: player.full_name,
+          name: getPlayerName(player),
           position: player.position,
           team,
           status: player.status,

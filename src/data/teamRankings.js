@@ -1,6 +1,7 @@
 /**
  * NFL Team Rankings and Classifications
- * Updated for 2025 season
+ * These are subjective tiers, not derived from live data - review them at the
+ * start of each season (`npm run check` will flag when they were last touched).
  */
 
 /**

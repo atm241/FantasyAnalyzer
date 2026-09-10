@@ -1,5 +1,6 @@
 import { SleeperAPI } from '../api/sleeper.js';
 import { EspnAPI } from '../api/espn.js';
+import { getCurrentSeasonYear } from '../data/nflSchedule.js';
 
 /**
  * Platform adapter to normalize data from different fantasy platforms
@@ -37,7 +38,7 @@ export class PlatformAdapter {
   /**
    * Get user's leagues
    */
-  async getUserLeagues(userId, season = '2025') {
+  async getUserLeagues(userId, season = getCurrentSeasonYear()) {
     if (this.platform === 'sleeper') {
       return await this.api.getUserLeagues(userId, season);
     } else if (this.platform === 'espn') {
@@ -66,7 +67,7 @@ export class PlatformAdapter {
     } else if (this.platform === 'espn') {
       const leagueData = await this.api.getLeague(
         leagueId,
-        this.config.season || 2025,
+        this.config.season || getCurrentSeasonYear(),
         this.config.cookies || {}
       );
       return this.api.parseLeagueData(leagueData);
@@ -82,7 +83,7 @@ export class PlatformAdapter {
     } else if (this.platform === 'espn') {
       const leagueData = await this.api.getLeague(
         leagueId,
-        this.config.season || 2025,
+        this.config.season || getCurrentSeasonYear(),
         this.config.cookies || {}
       );
 
@@ -113,7 +114,7 @@ export class PlatformAdapter {
     } else if (this.platform === 'espn') {
       const leagueData = await this.api.getLeague(
         leagueId,
-        this.config.season || 2025,
+        this.config.season || getCurrentSeasonYear(),
         this.config.cookies || {}
       );
 
@@ -149,7 +150,7 @@ export class PlatformAdapter {
         if (this.config.leagueId) {
           const leagueData = await this.api.getLeague(
             this.config.leagueId,
-            this.config.season || 2025,
+            this.config.season || getCurrentSeasonYear(),
             this.config.cookies || {}
           );
 
@@ -193,7 +194,7 @@ export class PlatformAdapter {
     } else if (this.platform === 'espn') {
       const espnMatchups = await this.api.getMatchups(
         leagueId,
-        this.config.season || 2025,
+        this.config.season || getCurrentSeasonYear(),
         week,
         this.config.cookies || {}
       );

@@ -6,9 +6,15 @@
   "type": "module",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch src/index.js",
+    "check": "node scripts/check-freshness.js"
   },
-  "keywords": ["fantasy", "football", "sleeper", "optimizer"],
+  "keywords": [
+    "fantasy",
+    "football",
+    "sleeper",
+    "optimizer"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {

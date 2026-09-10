@@ -11,6 +11,8 @@ import { StandingsAnalyzer } from './services/standings.js';
 import { TradeAnalyzer } from './services/tradeAnalyzer.js';
 import { DisplayFormatter } from './display/formatter.js';
 import readline from 'readline';
+import { getCurrentSeasonYear } from './data/nflSchedule.js';
+import { getPlayerName } from './utils/playerName.js';
 
 let api, rosterService, optimizer, waiverAnalyzer, aiSummary, firstToGo, standings, tradeAnalyzer;
 const display = new DisplayFormatter();
@@ -151,7 +153,7 @@ async function runAnalyzer(username, leagueId) {
           if (hasRosterData && roster && roster.players && roster.players.length > 0) {
             const topPlayers = roster.players.slice(0, 3).map(playerId => {
               const player = allPlayers[playerId];
-              return player?.full_name || 'Unknown Player';
+              return getPlayerName(player, 'Unknown Player');
             });
             console.log(`   Players: ${topPlayers.join(', ')}${roster.players.length > 3 ? '...' : ''}`);
           }
@@ -255,7 +257,7 @@ program
   .option('-l, --league <leagueId>', 'League ID')
   .option('--espn-s2 <espnS2>', 'ESPN S2 cookie (for private leagues)')
   .option('--swid <swid>', 'ESPN SWID cookie (for private leagues)')
-  .option('-s, --season <season>', 'Season year (default: 2025)', '2025')
+  .option('-s, --season <season>', 'Season year (defaults to the current NFL season)', String(getCurrentSeasonYear()))
   .action(async (options) => {
     const platform = options.platform.toLowerCase();
 

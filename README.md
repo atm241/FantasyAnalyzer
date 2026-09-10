@@ -19,6 +19,25 @@ A comprehensive fantasy football analysis tool supporting **Sleeper** and **ESPN
 npm install
 ```
 
+## Keeping season data current
+
+Season year, current week and BYE weeks are all derived at runtime from the live
+NFL schedule, so the tool rolls into a new season on its own - there are no
+hardcoded dates to update.
+
+The one exception is `src/data/teamRankings.js`, which holds hand-maintained
+subjective tiers (elite offenses, tough defenses). Run the freshness check at the
+start of each season to confirm everything lines up and to be reminded when those
+tiers need a review:
+
+```bash
+npm run check
+```
+
+It fails if any hardcoded season year creeps back into `src/`, if the schedule
+feed looks wrong, if the derived week disagrees with Sleeper's own season state,
+or if the subjective rankings predate the current season.
+
 ## Usage
 
 ### Sleeper League

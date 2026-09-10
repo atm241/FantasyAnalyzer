@@ -1,3 +1,5 @@
+import { getTeamsOnBye, hasByeData } from '../data/nflSchedule.js';
+
 /**
  * AI-powered team analysis and strategic recommendations
  */
@@ -132,8 +134,15 @@ export class AISummaryService {
       summary.strategicAdvice.push('Mid-season: Balance between depth and upside, prepare for playoff run');
     }
 
-    // Add BYE week planning
-    summary.strategicAdvice.push(`Week ${currentWeek} is an active BYE week - verify all starters are playing`);
+    // Add BYE week planning, but only when teams are actually on bye this week
+    const teamsOnBye = getTeamsOnBye(currentWeek);
+    if (teamsOnBye.length > 0) {
+      summary.strategicAdvice.push(
+        `Week ${currentWeek} BYE teams: ${teamsOnBye.join(', ')} - verify all starters are playing`
+      );
+    } else if (!hasByeData()) {
+      summary.strategicAdvice.push('BYE week data unavailable - verify all starters are playing');
+    }
 
     // Overall assessment
     const totalIssues = summary.criticalIssues.length;

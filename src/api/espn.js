@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { loadSchedule, getCurrentSeasonYear } from '../data/nflSchedule.js';
 
 const ESPN_BASE_URL = 'https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons';
 
@@ -13,7 +14,7 @@ export class EspnAPI {
   /**
    * Get league data
    */
-  async getLeague(leagueId, seasonId = 2025, cookies = {}) {
+  async getLeague(leagueId, seasonId = getCurrentSeasonYear(), cookies = {}) {
     const config = {
       params: {
         view: ['mSettings', 'mTeam', 'mRoster', 'mMatchup', 'mStandings']
@@ -70,41 +71,21 @@ export class EspnAPI {
   }
 
   /**
-   * Get current NFL week (approximate from current date)
-   * Shows the current NFL week based on which games are upcoming
-   * On Tuesday or later, advances to next week for lineup planning
+   * Get current NFL week and season.
+   *
+   * ESPN has no public season-state endpoint, so this is derived from the real
+   * NFL schedule rather than a hardcoded kickoff date. A week stays current
+   * until its last game has been played, which rolls the analysis over to the
+   * next week for lineup planning.
    */
   async getNFLState() {
-    // ESPN doesn't have this endpoint, calculate based on season start
-    const now = new Date();
-    const seasonStart = new Date('2025-09-04'); // 2025 NFL season starts Thursday, Sept 4
-    const season = '2025';
-
-    if (now < seasonStart) {
-      return { week: 1, season, season_type: 'pre' };
-    }
-
-    // Calculate week - each Thursday starts a new NFL week
-    // But we want Tuesday to trigger next week's lineup planning
-    const daysSinceStart = Math.floor((now - seasonStart) / (24 * 60 * 60 * 1000));
-    const dayOfWeek = now.getDay(); // 0=Sun, 1=Mon, 2=Tue, etc.
-
-    // Adjust to treat Tuesday as start of planning week
-    // If Sun/Mon, we're looking at current week
-    // If Tue-Sat, we're planning for next week
-    let adjustedDays = daysSinceStart;
-    if (dayOfWeek >= 2) {
-      // It's Tuesday or later - plan for next week
-      // Add days to push into next week calculation
-      adjustedDays += 7;
-    }
-
-    const currentWeek = Math.min(Math.floor(adjustedDays / 7) + 1, 18);
+    const season = getCurrentSeasonYear();
+    const schedule = await loadSchedule(season);
 
     return {
-      week: currentWeek,
-      season,
-      season_type: 'regular'
+      week: schedule.currentWeek(),
+      season: String(season),
+      season_type: schedule.seasonType()
     };
   }
 

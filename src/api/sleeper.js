@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { getCurrentSeasonYear } from '../data/nflSchedule.js';
 
 const SLEEPER_BASE_URL = 'https://api.sleeper.app/v1';
 
@@ -21,7 +22,7 @@ export class SleeperAPI {
   /**
    * Get all leagues for a user in a specific season
    */
-  async getUserLeagues(userId, season = '2024') {
+  async getUserLeagues(userId, season = getCurrentSeasonYear()) {
     const response = await axios.get(`${this.baseURL}/user/${userId}/leagues/nfl/${season}`);
     return response.data;
   }

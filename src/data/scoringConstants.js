@@ -69,9 +69,8 @@ export const INJURY_MULTIPLIERS = {
 /**
  * Season configuration
  */
+// Season year and start date are derived at runtime - see data/nflSchedule.js
 export const SEASON_CONFIG = {
-  CURRENT_YEAR: 2025,
-  SEASON_START_DATE: '2025-09-04', // Thursday, Sept 4, 2025
   EARLY_SEASON_END_WEEK: 8,
   PLAYOFF_PUSH_START_WEEK: 14,
   REGULAR_SEASON_WEEKS: 14,
