@@ -1,5 +1,5 @@
 import { POSITION_SCARCITY, getBasePoints } from '../data/scoringConstants.js';
-import { ELITE_OFFENSES, WEAK_OFFENSES, TEAM_MULTIPLIERS } from '../data/teamRankings.js';
+import { isEliteOffense, isWeakOffense, TEAM_MULTIPLIERS } from '../data/teamRankings.js';
 
 /**
  * Analyze trade opportunities by matching team needs
@@ -83,8 +83,8 @@ export class TradeAnalyzer {
     if (player.onBye) value *= 0.95;
 
     // Team quality bonus/penalty
-    if (ELITE_OFFENSES.includes(player.team)) value *= TEAM_MULTIPLIERS.ELITE;
-    if (WEAK_OFFENSES.includes(player.team)) value *= TEAM_MULTIPLIERS.WEAK;
+    if (isEliteOffense(player.team)) value *= TEAM_MULTIPLIERS.ELITE;
+    if (isWeakOffense(player.team)) value *= TEAM_MULTIPLIERS.WEAK;
 
     return Math.round(value);
   }
@@ -382,8 +382,8 @@ export class TradeAnalyzer {
     weeklyPoints *= (POSITION_SCARCITY[player.position] || 1.0);
 
     // Team quality
-    if (ELITE_OFFENSES.includes(player.team)) weeklyPoints *= TEAM_MULTIPLIERS.ELITE;
-    if (WEAK_OFFENSES.includes(player.team)) weeklyPoints *= TEAM_MULTIPLIERS.WEAK;
+    if (isEliteOffense(player.team)) weeklyPoints *= TEAM_MULTIPLIERS.ELITE;
+    if (isWeakOffense(player.team)) weeklyPoints *= TEAM_MULTIPLIERS.WEAK;
 
     // Injury penalty
     if (player.injuryStatus === 'Out') weeklyPoints *= 0.3;

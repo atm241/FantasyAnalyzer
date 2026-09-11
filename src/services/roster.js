@@ -1,4 +1,5 @@
 import { isOnBye, getByeWeek, loadSchedule } from '../data/nflSchedule.js';
+import { loadTeamRankings } from '../data/teamRankings.js';
 import { getPlayerName } from '../utils/playerName.js';
 
 /**
@@ -46,10 +47,12 @@ export class RosterService {
   }
 
   /**
-   * Make sure the current season's schedule (and therefore BYE weeks) is loaded
+   * Make sure the season data every projection depends on is loaded: the
+   * schedule (BYE weeks) and the offensive tiers derived from real scoring.
    */
-  async ensureSchedule() {
-    await loadSchedule(await this.getCurrentSeason());
+  async ensureSeasonData() {
+    const season = await this.getCurrentSeason();
+    await Promise.all([loadSchedule(season), loadTeamRankings(season)]);
   }
 
   /**
@@ -72,7 +75,7 @@ export class RosterService {
    */
   async formatRoster(roster) {
     await this.loadPlayers();
-    await this.ensureSchedule();
+    await this.ensureSeasonData();
     const currentWeek = await this.getCurrentWeek();
 
     const starters = roster.starters.map(playerId => {
@@ -117,7 +120,7 @@ export class RosterService {
    */
   async getAvailablePlayers(leagueId, position = null) {
     await this.loadPlayers();
-    await this.ensureSchedule();
+    await this.ensureSeasonData();
     const currentWeek = await this.getCurrentWeek();
     const rosters = await this.api.getLeagueRosters(leagueId);
 

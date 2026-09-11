@@ -35,14 +35,24 @@ export function getCurrentSeasonYear(now = new Date()) {
  * only to keep the tool usable if the schedule feed is unreachable.
  */
 function estimatedSeasonStart(season) {
-  const sept = new Date(Date.UTC(season, 8, 1));
+  const sept = new Date(season, 8, 1);
   // Labor Day is the first Monday in September.
-  const laborDay = 1 + ((8 - sept.getUTCDay()) % 7);
-  return new Date(Date.UTC(season, 8, laborDay + 3));
+  const laborDay = 1 + ((8 - sept.getDay()) % 7);
+  return new Date(season, 8, laborDay + 3);
 }
 
+/**
+ * Local calendar date as YYYY-MM-DD.
+ *
+ * Deliberately not toISOString(): that converts to UTC, so a Monday night game
+ * in any US timezone would already read as Tuesday and roll the analysis on to
+ * the next week mid-game. The schedule feed's dates are calendar dates, so they
+ * are compared against the local calendar date.
+ */
 function toDateKey(date) {
-  return date.toISOString().slice(0, 10);
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
 }
 
 class NflSchedule {

@@ -21,22 +21,30 @@ npm install
 
 ## Keeping season data current
 
-Season year, current week and BYE weeks are all derived at runtime from the live
-NFL schedule, so the tool rolls into a new season on its own - there are no
-hardcoded dates to update.
+Everything season-specific is derived at runtime, so the tool rolls into a new
+season on its own with no files to hand-edit:
 
-The one exception is `src/data/teamRankings.js`, which holds hand-maintained
-subjective tiers (elite offenses, tough defenses). Run the freshness check at the
-start of each season to confirm everything lines up and to be reminded when those
-tiers need a review:
+| Data | Source |
+|------|--------|
+| Season year & current week | Sleeper season state / the live NFL schedule |
+| BYE weeks | derived from the schedule (teams with no game that week) |
+| Offensive tiers | ranked from actual points per game |
+
+Offensive tiers use the current season once the average team has played 4 games,
+and last season's finished data before that. If either feed is unreachable the
+tool keeps running with a visible warning - weeks are estimated and every team is
+projected as average, rather than silently using stale numbers.
+
+Run the freshness check at the start of a season, or in CI:
 
 ```bash
 npm run check
 ```
 
-It fails if any hardcoded season year creeps back into `src/`, if the schedule
-feed looks wrong, if the derived week disagrees with Sleeper's own season state,
-or if the subjective rankings predate the current season.
+It fails if a hardcoded season year creeps back into `src/`, if the schedule feed
+doesn't yield 32 teams across 18 weeks with a bye for every team, if the derived
+week disagrees with Sleeper's own season state, or if the offensive tiers are
+missing, incomplete, or more than a season out of date.
 
 ## Usage
 

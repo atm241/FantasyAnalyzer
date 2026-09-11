@@ -1,5 +1,5 @@
 import { getBasePoints, getInjuryMultiplier } from '../data/scoringConstants.js';
-import { ELITE_OFFENSES, WEAK_OFFENSES, TEAM_MULTIPLIERS } from '../data/teamRankings.js';
+import { isEliteOffense, isWeakOffense, TEAM_MULTIPLIERS } from '../data/teamRankings.js';
 
 /**
  * Lineup optimizer using projections and scoring rules
@@ -84,9 +84,9 @@ export class LineupOptimizer {
     }
 
     // Team quality modifier
-    if (WEAK_OFFENSES.includes(team)) {
+    if (isWeakOffense(team)) {
       multiplier *= TEAM_MULTIPLIERS.WEAK;
-    } else if (ELITE_OFFENSES.includes(team)) {
+    } else if (isEliteOffense(team)) {
       multiplier *= TEAM_MULTIPLIERS.ELITE;
     }
 

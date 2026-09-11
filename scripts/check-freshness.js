@@ -7,21 +7,28 @@
  * defaults silently producing wrong advice a year later.
  */
 
-import { execSync } from 'node:child_process';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import axios from 'axios';
 import {
   loadSchedule,
   getCurrentSeasonYear,
   getTeamsOnBye
 } from '../src/data/nflSchedule.js';
+import {
+  loadTeamRankings,
+  getRankingsSeason,
+  getRankedOffenses,
+  isEliteOffense,
+  isWeakOffense
+} from '../src/data/teamRankings.js';
 
 const problems = [];
 const notes = [];
 
-/** Files allowed to mention a literal year (they explain why). */
-const YEAR_ALLOWLIST = new Set(['scripts/check-freshness.js']);
+/** Resolve against the repo, so the check works from any directory. */
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 function walk(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
@@ -31,13 +38,20 @@ function walk(dir) {
   });
 }
 
-// 1. No hardcoded season years anywhere in src/.
-for (const file of walk('src')) {
-  if (YEAR_ALLOWLIST.has(file)) continue;
+// 1. No hardcoded season years in executable code under src/.
+// Comments may reference a year (explaining history), so only code is scanned.
+function stripComments(line) {
+  const trimmed = line.trim();
+  if (trimmed.startsWith('*') || trimmed.startsWith('//') || trimmed.startsWith('/*')) return '';
+  return line.split('//')[0];
+}
+
+for (const file of walk(join(REPO_ROOT, 'src'))) {
   readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
-    const match = line.match(/\b20[2-9]\d\b/);
+    const match = stripComments(line).match(/\b20[2-9]\d\b/);
     if (match) {
-      problems.push(`${file}:${i + 1} hardcodes the year ${match[0]} - derive it instead: ${line.trim()}`);
+      const relative = file.slice(REPO_ROOT.length + 1);
+      problems.push(`${relative}:${i + 1} hardcodes the year ${match[0]} - derive it instead: ${line.trim()}`);
     }
   });
 }
@@ -75,22 +89,29 @@ try {
   notes.push(`Could not cross-check against Sleeper season state (${error.message})`);
 }
 
-// 4. Subjective tiers can't be derived - warn when they predate this season.
-try {
-  const lastTouched = execSync('git log -1 --format=%aI -- src/data/teamRankings.js', { encoding: 'utf8' }).trim();
-  if (lastTouched) {
-    const touchedSeason = getCurrentSeasonYear(new Date(lastTouched));
-    if (touchedSeason < season) {
-      problems.push(
-        `src/data/teamRankings.js was last updated for the ${touchedSeason} season ` +
-        `(${lastTouched.slice(0, 10)}) - these tiers are hand-maintained and need a review for ${season}.`
-      );
-    } else {
-      notes.push(`teamRankings.js reviewed for the ${touchedSeason} season`);
-    }
+// 4. Offensive tiers must derive from real scoring data.
+await loadTeamRankings(season);
+const rankingsSeason = getRankingsSeason();
+const ranked = getRankedOffenses();
+
+if (!rankingsSeason || ranked.length === 0) {
+  problems.push('Could not derive offensive tiers - every team would be projected as average.');
+} else {
+  if (ranked.length !== 32) {
+    problems.push(`Offensive tiers cover ${ranked.length} teams, expected 32.`);
   }
-} catch {
-  notes.push('Could not read git history for teamRankings.js');
+  if (season - rankingsSeason > 1) {
+    problems.push(`Offensive tiers derive from ${rankingsSeason}, which is more than a season behind ${season}.`);
+  }
+  const elite = ranked.filter(t => isEliteOffense(t.team)).map(t => t.team);
+  const weak = ranked.filter(t => isWeakOffense(t.team)).map(t => t.team);
+  const overlap = elite.filter(t => weak.includes(t));
+  if (overlap.length > 0) {
+    problems.push(`Teams ranked both elite and weak: ${overlap.join(', ')}`);
+  }
+  notes.push(`Offensive tiers from ${rankingsSeason} scoring (${ranked.length} teams)`);
+  notes.push(`  elite: ${elite.join(', ')}`);
+  notes.push(`  weak:  ${weak.join(', ')}`);
 }
 
 for (const note of notes) console.log(`  ${note}`);

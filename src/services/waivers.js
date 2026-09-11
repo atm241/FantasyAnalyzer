@@ -1,5 +1,5 @@
 import { POSITION_VALUE, isPlayerLikelyOut } from '../data/scoringConstants.js';
-import { ELITE_OFFENSES } from '../data/teamRankings.js';
+import { isEliteOffense } from '../data/teamRankings.js';
 
 /**
  * Waiver wire analysis and recommendations
@@ -44,7 +44,7 @@ export class WaiverAnalyzer {
     }
 
     // Team matters (players on good teams score more)
-    if (ELITE_OFFENSES.includes(player.team)) {
+    if (isEliteOffense(player.team)) {
       score += 5;
     }
 

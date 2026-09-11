@@ -1,5 +1,5 @@
 import { ROSTER_POSITION_VALUE } from '../data/scoringConstants.js';
-import { WEAK_OFFENSES } from '../data/teamRankings.js';
+import { isWeakOffense } from '../data/teamRankings.js';
 
 /**
  * Identify players to drop or trade
@@ -35,7 +35,7 @@ export class FirstToGoAnalyzer {
     if (player.injuryStatus === 'Questionable') score -= 5;
 
     // Team quality (players on bad teams less valuable)
-    if (WEAK_OFFENSES.includes(player.team)) {
+    if (isWeakOffense(player.team)) {
       score -= 10;
     }
 
@@ -140,7 +140,7 @@ export class FirstToGoAnalyzer {
       reasons.push(`Deep at ${player.position} (${positionDepth[player.position]} total)`);
     }
 
-    if (WEAK_OFFENSES.includes(player.team)) {
+    if (isWeakOffense(player.team)) {
       reasons.push('Weak offense');
     }
 

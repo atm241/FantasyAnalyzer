@@ -12,6 +12,7 @@ import { TradeAnalyzer } from './services/tradeAnalyzer.js';
 import { DisplayFormatter } from './display/formatter.js';
 import readline from 'readline';
 import { getCurrentSeasonYear } from './data/nflSchedule.js';
+import { getRankingsSeason } from './data/teamRankings.js';
 import { getPlayerName } from './utils/playerName.js';
 
 let api, rosterService, optimizer, waiverAnalyzer, aiSummary, firstToGo, standings, tradeAnalyzer;
@@ -108,7 +109,13 @@ async function runAnalyzer(username, leagueId) {
 
     // Get and display current week
     const currentWeek = await rosterService.getCurrentWeek();
+    await rosterService.ensureSeasonData();
     display.displayInfo(`Analyzing Week ${currentWeek}`);
+
+    const rankingsSeason = getRankingsSeason();
+    if (rankingsSeason) {
+      display.displayInfo(`Offensive tiers based on ${rankingsSeason} scoring`);
+    }
 
     // For ESPN, find the user's team by matching username/team name
     if (api.platform === 'espn') {
