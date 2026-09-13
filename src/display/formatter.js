@@ -61,7 +61,9 @@ export class DisplayFormatter {
           // Position swap between two starters
           console.log(`\n${idx + 1}. ${chalk.blue('Move:')} ${rec.player.name} (${rec.player.position})`);
           console.log(`   ${chalk.yellow('From:')} ${rec.fromSlot} → ${chalk.yellow('To:')} ${rec.toSlot}`);
-          console.log(`   ${chalk.gray('This allows:')} ${rec.affectedPlayer.name} to fill the ${rec.fromSlot} slot`);
+          if (rec.affectedPlayer?.name) {
+            console.log(`   ${chalk.gray('This allows:')} ${rec.affectedPlayer.name} to fill the ${rec.fromSlot} slot`);
+          }
           console.log(`   ${chalk.yellow('Improvement:')} +${rec.improvement.toFixed(1)} points`);
         }
       });
@@ -165,6 +167,8 @@ export class DisplayFormatter {
     if (player.injuryStatus === 'Questionable') return chalk.yellow('Q');
     if (player.injuryStatus === 'Doubtful') return chalk.red('D');
     if (player.injuryStatus === 'IR') return chalk.red('IR');
+    // Sleeper omits players it does not expect to play at all this week.
+    if (player.projected === false) return chalk.gray('NO PROJ');
     return chalk.green('✓');
   }
 

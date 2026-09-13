@@ -10,6 +10,20 @@ export class LineupOptimizer {
   }
 
   /**
+   * Points to plan around for a player.
+   *
+   * Prefers the real weekly projection. When the feed loaded but has no entry
+   * for a player, that player is not expected to play, so they score 0 - an
+   * estimate there would invent points for someone who is not playing.
+   * Estimates are only used when no projection feed is available at all.
+   */
+  projectionFor(player, scoringSettings = {}) {
+    if (player?.realProjection != null) return player.realProjection;
+    if (player?.projected === false && this.rosterService.hasProjections()) return 0;
+    return this.estimatePoints(player, scoringSettings);
+  }
+
+  /**
    * Enhanced projection model with player quality tiers
    */
   estimatePoints(player, scoringSettings) {
@@ -119,7 +133,7 @@ export class LineupOptimizer {
     const playersWithProjections = allPlayers.map(player => ({
       ...player,
       // Use real projection if available, otherwise estimate
-      projection: player.realProjection ?? this.estimatePoints(player, scoringSettings)
+      projection: this.projectionFor(player, scoringSettings)
     }));
 
     // Sort by projection (highest first)
@@ -172,12 +186,13 @@ export class LineupOptimizer {
    * Compare current lineup to optimal lineup
    */
   async analyzeLineup(leagueId, currentRoster) {
-    const formatted = await this.rosterService.formatRoster(currentRoster);
+    const formatted = await this.rosterService.formatRoster(currentRoster, leagueId);
     const optimal = await this.optimizeLineup(leagueId, formatted);
+    const scoringSettings = await this.rosterService.getScoringSettings(leagueId);
 
     // Calculate current lineup points (use real projections if available)
     const currentPoints = formatted.starters.reduce((sum, player) => {
-      return sum + (player.realProjection ?? this.estimatePoints(player, {}));
+      return sum + this.projectionFor(player, scoringSettings);
     }, 0);
 
     const recommendations = [];
@@ -210,7 +225,7 @@ export class LineupOptimizer {
 
       if (isOptimalPlayerOnBench) {
         // Case 1: Bench player should start
-        const currentPlayerProjection = currentPlayer.realProjection ?? this.estimatePoints(currentPlayer, {});
+        const currentPlayerProjection = this.projectionFor(currentPlayer, scoringSettings);
         const improvement = optimalPlayer.projection - currentPlayerProjection;
 
         if (improvement >= MIN_IMPROVEMENT) {
@@ -229,7 +244,7 @@ export class LineupOptimizer {
         // Calculate the improvement from this position swap
         // This is a position optimization - both players are already starting
         const optimalPlayerInNewSlot = optimalPlayer.projection;
-        const currentPlayerProjection = currentPlayer.realProjection ?? this.estimatePoints(currentPlayer, {});
+        const currentPlayerProjection = this.projectionFor(currentPlayer, scoringSettings);
         const currentPlayerInThisSlot = currentPlayerProjection;
 
         // Find what player is taking the optimal player's old slot
@@ -241,16 +256,22 @@ export class LineupOptimizer {
         const improvement = (optimalPlayerInNewSlot - currentPlayerInThisSlot) +
                            (playerTakingOldSlotProjection - optimalPlayerInOldSlot);
 
-        if (improvement >= MIN_IMPROVEMENT) {
+        const fromSlot = formatted.starters[currentPosition.index].slotPosition
+          || currentPosition.player.position;
+
+        // Only worth reporting if the player actually changes slot.
+        if (improvement >= MIN_IMPROVEMENT && fromSlot !== optimalPlayer.slotPosition) {
           recommendations.push({
             type: 'position_swap',
             player: optimalPlayer,
             fromPosition: currentPosition.index,
             toPosition: idx,
-            fromSlot: formatted.starters[currentPosition.index].slotPosition || currentPosition.player.position,
+            fromSlot,
             toSlot: optimalPlayer.slotPosition,
             improvement,
-            affectedPlayer: currentPlayer
+            // Whoever the optimal lineup puts in the slot being vacated - not
+            // the player currently sitting in the destination slot.
+            affectedPlayer: playerTakingOldSlot?.empty ? null : playerTakingOldSlot
           });
         }
       }

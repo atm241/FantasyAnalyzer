@@ -221,6 +221,17 @@ export class PlatformAdapter {
   /**
    * Get trending players (Sleeper only)
    */
+  /**
+   * Weekly projections keyed by player id. ESPN has no equivalent public feed,
+   * so it falls back to the optimizer's own estimates.
+   */
+  async getProjections(season, week) {
+    if (this.platform === 'sleeper') {
+      return await this.api.getProjections(season, week);
+    }
+    return {};
+  }
+
   async getTrendingPlayers(type = 'add', hours = 24) {
     if (this.platform === 'sleeper') {
       return await this.api.getTrendingPlayers(type, hours);

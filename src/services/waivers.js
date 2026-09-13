@@ -81,7 +81,7 @@ export class WaiverAnalyzer {
    * Analyze roster weaknesses and suggest pickups
    */
   async analyzeRosterNeeds(leagueId, roster) {
-    const formatted = await this.rosterService.formatRoster(roster);
+    const formatted = await this.rosterService.formatRoster(roster, leagueId);
     const rosterPositions = await this.rosterService.getRosterPositions(leagueId);
 
     // Count players by position

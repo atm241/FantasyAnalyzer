@@ -103,7 +103,8 @@ export class TradeAnalyzer {
 
     // Format your roster with player details
     const yourFormattedRoster = await this.rosterService.formatRoster(
-      allRosters.find(r => r.owner_id === yourUserId)
+      allRosters.find(r => r.owner_id === yourUserId),
+      leagueId
     );
 
     const tradeMatches = [];
@@ -113,7 +114,7 @@ export class TradeAnalyzer {
       if (opponentRoster.owner_id === yourUserId) continue; // Skip your own team
 
       // Format opponent roster
-      const opponentFormatted = await this.rosterService.formatRoster(opponentRoster);
+      const opponentFormatted = await this.rosterService.formatRoster(opponentRoster, leagueId);
       const opponentNeeds = this.calculateTeamNeeds(opponentFormatted);
 
       // Find complementary needs (you have surplus where they have deficit, vice versa)

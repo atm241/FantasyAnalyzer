@@ -194,7 +194,7 @@ async function runAnalyzer(username, leagueId) {
     }
 
     // Display current roster
-    const formatted = await rosterService.formatRoster(roster);
+    const formatted = await rosterService.formatRoster(roster, league.league_id);
     display.displayRoster(formatted);
 
     // Analyze lineup

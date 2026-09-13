@@ -78,6 +78,19 @@ export class SleeperAPI {
   /**
    * Get matchups for a specific week
    */
+  /**
+   * Get weekly projections, keyed by player id.
+   *
+   * Returns each player's projected stat line, including pts_std / pts_half_ppr
+   * / pts_ppr. Players Sleeper does not expect to play are simply absent.
+   */
+  async getProjections(season, week) {
+    const response = await axios.get(
+      `${this.baseURL}/projections/nfl/regular/${season}/${week}`
+    );
+    return response.data || {};
+  }
+
   async getMatchups(leagueId, week) {
     const response = await axios.get(`${this.baseURL}/league/${leagueId}/matchups/${week}`);
     return response.data;

@@ -10,6 +10,7 @@ export class RosterService {
     this.api = api;
     this.players = null;
     this.nflState = null;
+    this.projections = null;
   }
 
   /**
@@ -52,7 +53,62 @@ export class RosterService {
    */
   async ensureSeasonData() {
     const season = await this.getCurrentSeason();
-    await Promise.all([loadSchedule(season), loadTeamRankings(season)]);
+    await Promise.all([
+      loadSchedule(season),
+      loadTeamRankings(season),
+      this.loadProjections()
+    ]);
+  }
+
+  /**
+   * Load and cache this week's projections, keyed by player id.
+   *
+   * A null cache means the feed was unavailable, which is different from a
+   * player simply not being projected - see buildProjection().
+   */
+  async loadProjections() {
+    if (this.projections !== null) return this.projections;
+
+    const { season, week } = await this.getNFLState();
+    try {
+      this.projections = await this.api.getProjections(season, week) || {};
+    } catch (error) {
+      this.projections = {};
+      console.warn(
+        `\u26a0\ufe0f  Could not load week ${week} projections (${error.message}). ` +
+        'Falling back to estimated points.'
+      );
+    }
+    return this.projections;
+  }
+
+  /** True when a projection feed actually loaded (vs. being unavailable). */
+  hasProjections() {
+    return Boolean(this.projections) && Object.keys(this.projections).length > 0;
+  }
+
+  /**
+   * The projected points for a player under this league's scoring.
+   *
+   * Returns { projection, projected } where `projected` is false when the feed
+   * has no entry for the player - Sleeper omits players it does not expect to
+   * play, so they should not inherit an optimistic estimate.
+   */
+  buildProjection(playerId, scoringSettings) {
+    const stats = this.projections?.[playerId];
+    if (!stats) return { projection: null, projected: false };
+
+    const reception = scoringSettings?.rec ?? 0;
+    const points = reception >= 1
+      ? stats.pts_ppr
+      : reception >= 0.5
+        ? stats.pts_half_ppr
+        : stats.pts_std;
+
+    const value = points ?? stats.pts_ppr ?? stats.pts_half_ppr ?? stats.pts_std;
+    return value == null
+      ? { projection: null, projected: false }
+      : { projection: value, projected: true };
   }
 
   /**
@@ -73,14 +129,23 @@ export class RosterService {
   /**
    * Format roster with player details
    */
-  async formatRoster(roster) {
+  async formatRoster(roster, leagueId = null) {
     await this.loadPlayers();
     await this.ensureSeasonData();
     const currentWeek = await this.getCurrentWeek();
 
-    const starters = roster.starters.map(playerId => {
+    const scoringSettings = leagueId ? await this.getScoringSettings(leagueId) : null;
+
+    // Starting slots in league order (QB, RB, RB, ... FLEX, DEF), so a player's
+    // actual slot is known rather than assumed from their position.
+    const startingSlots = leagueId
+      ? (await this.getRosterPositions(leagueId)).filter(slot => slot !== 'BN')
+      : [];
+
+    const describe = (playerId, slotPosition) => {
       const player = this.getPlayer(playerId);
       const team = player?.team || 'FA';
+      const { projection, projected } = this.buildProjection(playerId, scoringSettings);
       return {
         playerId,
         name: getPlayerName(player),
@@ -90,27 +155,18 @@ export class RosterService {
         injuryStatus: player?.injury_status || null,
         onBye: isOnBye(team, currentWeek),
         byeWeek: getByeWeek(team),
-        realProjection: player?.projected_points || null
+        realProjection: projection,
+        projected,
+        ...(slotPosition ? { slotPosition } : {})
       };
-    });
+    };
+
+    const starters = roster.starters.map((playerId, idx) =>
+      describe(playerId, startingSlots[idx]));
 
     const bench = roster.players
       .filter(playerId => !roster.starters.includes(playerId))
-      .map(playerId => {
-        const player = this.getPlayer(playerId);
-        const team = player?.team || 'FA';
-        return {
-          playerId,
-          name: getPlayerName(player),
-          position: player?.position || 'N/A',
-          team,
-          status: player?.status || 'Active',
-          injuryStatus: player?.injury_status || null,
-          onBye: isOnBye(team, currentWeek),
-          byeWeek: getByeWeek(team),
-          realProjection: player?.projected_points || null
-        };
-      });
+      .map(playerId => describe(playerId, null));
 
     return { starters, bench };
   }
