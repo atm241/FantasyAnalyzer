@@ -18,7 +18,11 @@ export class LineupOptimizer {
    * Estimates are only used when no projection feed is available at all.
    */
   projectionFor(player, scoringSettings = {}) {
-    if (player?.realProjection != null) return player.realProjection;
+    if (player?.realProjection != null) {
+      // Sleeper's projections are published before game-day designations settle,
+      // so a player already ruled out can still carry a full projection.
+      return player.realProjection * getInjuryMultiplier(player.injuryStatus);
+    }
     if (player?.projected === false && this.rosterService.hasProjections()) return 0;
     return this.estimatePoints(player, scoringSettings);
   }
