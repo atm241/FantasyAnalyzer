@@ -15,3 +15,18 @@ export function getPlayerName(player, fallback = 'Unknown') {
 
   return player.name || player.team || fallback;
 }
+
+/**
+ * Sleeper represents an unfilled starting slot with the player id "0".
+ */
+export function isEmptySlot(playerId) {
+  return !playerId || playerId === '0' || playerId === 0;
+}
+
+/**
+ * Roster entries that are real players. The lineup keeps a placeholder for an
+ * unfilled starting slot, which must never be counted, traded or dropped.
+ */
+export function realPlayers(entries) {
+  return (entries || []).filter(entry => entry && !entry.emptySlot);
+}

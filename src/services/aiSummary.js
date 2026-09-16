@@ -17,6 +17,7 @@ export class AISummaryService {
     // Analyze the data
     const summary = {
       week: currentWeek,
+      pointsGain: lineupAnalysis.pointsGain || 0,
       criticalIssues: [],
       opportunities: [],
       lineupChanges: [],
@@ -125,6 +126,18 @@ export class AISummaryService {
       });
     }
 
+    // An unfilled starting slot scores zero - surface it above everything else.
+    const emptySlots = (lineupAnalysis.currentLineup || []).filter(p => p.emptySlot);
+    if (emptySlots.length > 0) {
+      summary.criticalIssues.unshift({
+        type: 'empty_slot',
+        severity: 'high',
+        message: `${emptySlots.length} empty starting slot(s)`,
+        players: emptySlots.map(p => `${p.slotPosition || p.position} - nobody started`),
+        action: 'Start someone - an empty slot scores 0 points'
+      });
+    }
+
     // Strategic advice
     if (currentWeek <= 8) {
       summary.strategicAdvice.push('Early season: Focus on building depth and identifying breakout players');
@@ -186,22 +199,13 @@ export class AISummaryService {
       lines.push('');
     }
 
-    // Lineup Changes
+    // Lineup changes are rendered in full by the LINEUP OPTIMIZATION section
+    // above; repeating them here just made the report twice as long.
     if (summary.lineupChanges.length > 0) {
-      lines.push('🔄 RECOMMENDED LINEUP CHANGES:');
-      summary.lineupChanges.forEach((change, idx) => {
-        lines.push(`\n${idx + 1}. BENCH: ${change.bench}`);
-        if (change.benchProjection !== null) {
-          lines.push(`          Proj: ${change.benchProjection.toFixed(1)} pts`);
-        }
-        lines.push(`   START:  ${change.start} (${change.improvement})`);
-        if (change.startProjection !== null) {
-          lines.push(`          Proj: ${change.startProjection.toFixed(1)} pts`);
-        }
-        if (change.reason) {
-          lines.push(`   Reason: ${change.reason}`);
-        }
-      });
+      lines.push(
+        `🔄 LINEUP: ${summary.lineupChanges.length} change(s) available ` +
+        `(+${summary.pointsGain.toFixed(1)} pts) - see LINEUP OPTIMIZATION above`
+      );
       lines.push('');
     }
 

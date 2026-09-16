@@ -1,5 +1,6 @@
 import { ROSTER_POSITION_VALUE } from '../data/scoringConstants.js';
 import { isWeakOffense } from '../data/teamRankings.js';
+import { realPlayers } from '../utils/playerName.js';
 
 /**
  * Identify players to drop or trade
@@ -53,7 +54,7 @@ export class FirstToGoAnalyzer {
   async analyzeFirstToGo(roster, currentWeek) {
     // Calculate position depth
     const positionDepth = {};
-    const allPlayers = [...roster.starters, ...roster.bench];
+    const allPlayers = realPlayers([...roster.starters, ...roster.bench]);
 
     allPlayers.forEach(player => {
       positionDepth[player.position] = (positionDepth[player.position] || 0) + 1;

@@ -1,4 +1,6 @@
 import { POSITION_SCARCITY, getBasePoints } from '../data/scoringConstants.js';
+import { playerQuality } from '../data/playerQuality.js';
+import { realPlayers } from '../utils/playerName.js';
 import { isEliteOffense, isWeakOffense, TEAM_MULTIPLIERS } from '../data/teamRankings.js';
 
 /**
@@ -19,7 +21,7 @@ export class TradeAnalyzer {
     }
 
     const positionDepth = {};
-    const allPlayers = [...roster.starters, ...roster.bench];
+    const allPlayers = realPlayers([...roster.starters, ...roster.bench]);
 
     // Count players by position
     allPlayers.forEach(player => {
@@ -69,6 +71,9 @@ export class TradeAnalyzer {
 
     // Starter bonus
     if (isStarter) value += 25;
+
+    // Player quality, so a stud and a deep backup are not valued the same.
+    value *= playerQuality(player);
 
     // Position scarcity multiplier
     value *= (POSITION_SCARCITY[player.position] || 1.0);
@@ -170,7 +175,7 @@ export class TradeAnalyzer {
         // You have excess, they have shortage - good trade opportunity!
 
         // Get your tradeable players at this position (mid-tier, not your best or worst)
-        const yourPositionPlayers = [...yourRoster.starters, ...yourRoster.bench]
+        const yourPositionPlayers = realPlayers([...yourRoster.starters, ...yourRoster.bench])
           .filter(p => p.position === position)
           .map(p => ({
             ...p,
@@ -247,7 +252,7 @@ export class TradeAnalyzer {
       if (!theirNeeds.deficit[position]) continue;
 
       // Get your players at this position (sorted by value)
-      const yourPositionPlayers = [...yourRoster.starters, ...yourRoster.bench]
+      const yourPositionPlayers = realPlayers([...yourRoster.starters, ...yourRoster.bench])
         .filter(p => p.position === position)
         .map(p => ({
           ...p,
@@ -292,7 +297,7 @@ export class TradeAnalyzer {
 
       // Get their players at return positions
       for (const returnPos of returnPositions) {
-        const theirPositionPlayers = [...theirRoster.starters, ...theirRoster.bench]
+        const theirPositionPlayers = realPlayers([...theirRoster.starters, ...theirRoster.bench])
           .filter(p => p.position === returnPos)
           .map(p => ({
             ...p,

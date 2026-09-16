@@ -17,7 +17,10 @@ export class DisplayFormatter {
     console.log('\n' + chalk.bold.green('STARTERS:'));
     formatted.starters.forEach((player, idx) => {
       const status = this.getStatusIndicator(player);
-      console.log(`${idx + 1}. ${chalk.bold(player.name.padEnd(25))} ${player.position.padEnd(4)} ${player.team.padEnd(4)} ${status}`);
+      const name = player.emptySlot
+        ? chalk.red(player.name.padEnd(25))
+        : chalk.bold(player.name.padEnd(25));
+      console.log(`${idx + 1}. ${name} ${player.position.padEnd(4)} ${player.team.padEnd(4)} ${status}`);
     });
 
     // Bench
@@ -38,38 +41,53 @@ export class DisplayFormatter {
     console.log(chalk.bold.magenta('LINEUP OPTIMIZATION'));
     console.log(chalk.bold.magenta('='.repeat(70)));
 
-    console.log(`\nCurrent Projected Points: ${chalk.yellow(analysis.currentPoints.toFixed(1))}`);
-    console.log(`Optimal Projected Points: ${chalk.green(analysis.optimalPoints.toFixed(1))}`);
+    const gain = analysis.pointsGain;
+    console.log(
+      `\nProjected: ${chalk.yellow(analysis.currentPoints.toFixed(1))}` +
+      ` -> ${chalk.green(analysis.optimalPoints.toFixed(1))}` +
+      (gain > 0.5 ? chalk.bold.red(`   (+${gain.toFixed(1)})`) : '')
+    );
 
-    if (analysis.pointsGain > 0.5) {
-      console.log(chalk.bold.red(`\nPotential Gain: +${analysis.pointsGain.toFixed(1)} points`));
-      console.log('\n' + chalk.bold.red('RECOMMENDED CHANGES:'));
-
-      analysis.recommendations.forEach((rec, idx) => {
-        if (rec.type === 'swap') {
-          // Bench-to-starter swap
-          console.log(`\n${idx + 1}. ${chalk.red('Bench:')} ${rec.out.name} (${rec.out.position})`);
-          if (rec.out.projection !== undefined) {
-            console.log(`          ${chalk.gray('Projected:')} ${rec.out.projection.toFixed(1)} pts`);
-          }
-          console.log(`   ${chalk.green('Start:')} ${rec.in.name} (${rec.in.position})`);
-          if (rec.in.projection !== undefined) {
-            console.log(`          ${chalk.gray('Projected:')} ${rec.in.projection.toFixed(1)} pts`);
-          }
-          console.log(`   ${chalk.yellow('Improvement:')} +${rec.improvement.toFixed(1)} points`);
-        } else if (rec.type === 'position_swap') {
-          // Position swap between two starters
-          console.log(`\n${idx + 1}. ${chalk.blue('Move:')} ${rec.player.name} (${rec.player.position})`);
-          console.log(`   ${chalk.yellow('From:')} ${rec.fromSlot} → ${chalk.yellow('To:')} ${rec.toSlot}`);
-          if (rec.affectedPlayer?.name) {
-            console.log(`   ${chalk.gray('This allows:')} ${rec.affectedPlayer.name} to fill the ${rec.fromSlot} slot`);
-          }
-          console.log(`   ${chalk.yellow('Improvement:')} +${rec.improvement.toFixed(1)} points`);
-        }
-      });
-    } else {
-      console.log(chalk.bold.green('\n✓ Your lineup is already optimal!'));
+    if (gain <= 0.5) {
+      console.log(chalk.bold.green('\n\u2713 Your lineup is already optimal!'));
+      console.log('\n' + chalk.bold.magenta('='.repeat(70)) + '\n');
+      return;
     }
+
+    const plan = analysis.lineupPlan;
+
+    // What to actually do, which is what the slot-by-slot diff kept obscuring.
+    if (plan?.joining.length || plan?.leaving.length) {
+      console.log('\n' + chalk.bold.green('START:'));
+      plan.joining.forEach(p => {
+        const slot = p.slotPosition && p.slotPosition !== p.position ? ` at ${p.slotPosition}` : '';
+        console.log(
+          `  ${chalk.green('+')} ${p.name.padEnd(24)} ${(p.position || '').padEnd(4)}` +
+          ` ${chalk.green((p.projection ?? 0).toFixed(1).padStart(5))} pts${slot}`
+        );
+      });
+
+      if (plan.leaving.length) {
+        console.log('\n' + chalk.bold.red('SIT:'));
+        plan.leaving.forEach(p => {
+          console.log(
+            `  ${chalk.red('-')} ${p.name.padEnd(24)} ${(p.position || '').padEnd(4)}` +
+            ` ${chalk.red((p.projection ?? 0).toFixed(1).padStart(5))} pts`
+          );
+        });
+      }
+    }
+
+    // Full slot-by-slot view, so the whole lineup is visible at a glance.
+    console.log('\n' + chalk.bold('RESULTING LINEUP:'));
+    console.log(chalk.gray('  SLOT   CURRENT                   OPTIMAL'));
+    plan?.slots.forEach(({ slot, current, optimal, changed }) => {
+      const from = (current.name || '-').slice(0, 24).padEnd(25);
+      const to = (optimal.name || '(empty)').slice(0, 24);
+      const marker = changed ? chalk.yellow('>') : ' ';
+      const line = `  ${marker} ${slot.padEnd(5)} ${from} ${to}`;
+      console.log(changed ? line : chalk.gray(line));
+    });
 
     console.log('\n' + chalk.bold.magenta('='.repeat(70)) + '\n');
   }
@@ -162,6 +180,7 @@ export class DisplayFormatter {
    * Get status indicator for player
    */
   getStatusIndicator(player) {
+    if (player.emptySlot) return chalk.bgRed.white(' EMPTY ');
     if (player.onBye) return chalk.blue('BYE');
     if (player.injuryStatus === 'Out') return chalk.red('OUT');
     if (player.injuryStatus === 'Questionable') return chalk.yellow('Q');

@@ -17,6 +17,36 @@ export class PlatformAdapter {
     } else {
       throw new Error(`Unsupported platform: ${platform}`);
     }
+
+    // League settings, rosters and the player index do not change during a run,
+    // but are needed by almost every service. Without this they were refetched
+    // dozens of times per run.
+    this.cache = new Map();
+  }
+
+  /**
+   * Memoise a request that is immutable for the lifetime of this run.
+   * Stores the promise so concurrent callers share one request; a failed
+   * request is evicted so it can be retried.
+   */
+  memo(key, fn) {
+    if (!this.cache.has(key)) {
+      this.cache.set(key, fn().catch(error => {
+        this.cache.delete(key);
+        throw error;
+      }));
+    }
+    return this.cache.get(key);
+  }
+
+  /** The raw ESPN league payload, fetched once and shared by every consumer. */
+  espnLeague(leagueId) {
+    const season = this.config.season || getCurrentSeasonYear();
+    return this.memo(`espn:${leagueId}:${season}`, () => this.api.getLeague(
+      leagueId,
+      parseInt(season),
+      this.config.cookies || {}
+    ));
   }
 
   /**
@@ -24,7 +54,7 @@ export class PlatformAdapter {
    */
   async getUser(identifier) {
     if (this.platform === 'sleeper') {
-      return await this.api.getUser(identifier);
+      return await this.memo(`user:${identifier}`, () => this.api.getUser(identifier));
     } else if (this.platform === 'espn') {
       // ESPN doesn't have user lookup by username
       // Return a mock user object
@@ -47,11 +77,7 @@ export class PlatformAdapter {
         throw new Error('ESPN requires leagueId in config');
       }
 
-      const leagueData = await this.api.getLeague(
-        this.config.leagueId,
-        parseInt(season),
-        this.config.cookies || {}
-      );
+      const leagueData = await this.espnLeague(this.config.leagueId);
 
       const normalized = this.api.parseLeagueData(leagueData);
       return [normalized];
@@ -63,13 +89,9 @@ export class PlatformAdapter {
    */
   async getLeague(leagueId) {
     if (this.platform === 'sleeper') {
-      return await this.api.getLeague(leagueId);
+      return await this.memo(`league:${leagueId}`, () => this.api.getLeague(leagueId));
     } else if (this.platform === 'espn') {
-      const leagueData = await this.api.getLeague(
-        leagueId,
-        this.config.season || getCurrentSeasonYear(),
-        this.config.cookies || {}
-      );
+      const leagueData = await this.espnLeague(leagueId);
       return this.api.parseLeagueData(leagueData);
     }
   }
@@ -79,13 +101,9 @@ export class PlatformAdapter {
    */
   async getLeagueRosters(leagueId) {
     if (this.platform === 'sleeper') {
-      return await this.api.getLeagueRosters(leagueId);
+      return await this.memo(`rosters:${leagueId}`, () => this.api.getLeagueRosters(leagueId));
     } else if (this.platform === 'espn') {
-      const leagueData = await this.api.getLeague(
-        leagueId,
-        this.config.season || getCurrentSeasonYear(),
-        this.config.cookies || {}
-      );
+      const leagueData = await this.espnLeague(leagueId);
 
       return leagueData.teams.map(team => {
         const parsed = this.api.parseTeamData(team, leagueData.members);
@@ -110,13 +128,9 @@ export class PlatformAdapter {
    */
   async getLeagueUsers(leagueId) {
     if (this.platform === 'sleeper') {
-      return await this.api.getLeagueUsers(leagueId);
+      return await this.memo(`users:${leagueId}`, () => this.api.getLeagueUsers(leagueId));
     } else if (this.platform === 'espn') {
-      const leagueData = await this.api.getLeague(
-        leagueId,
-        this.config.season || getCurrentSeasonYear(),
-        this.config.cookies || {}
-      );
+      const leagueData = await this.espnLeague(leagueId);
 
       return leagueData.teams.map(team => {
         const owner = leagueData.members?.find(m => m.id === team.primaryOwner);
@@ -140,7 +154,7 @@ export class PlatformAdapter {
    */
   async getAllPlayers() {
     if (this.platform === 'sleeper') {
-      return await this.api.getAllPlayers();
+      return await this.memo('players', () => this.api.getAllPlayers());
     } else if (this.platform === 'espn') {
       // ESPN doesn't have a bulk player endpoint
       // We'll build a player cache from rosters
@@ -148,11 +162,7 @@ export class PlatformAdapter {
         this.playerCache = {};
 
         if (this.config.leagueId) {
-          const leagueData = await this.api.getLeague(
-            this.config.leagueId,
-            this.config.season || getCurrentSeasonYear(),
-            this.config.cookies || {}
-          );
+          const leagueData = await this.espnLeague(this.config.leagueId);
 
           leagueData.teams?.forEach(team => {
             team.roster?.entries?.forEach(entry => {
@@ -234,7 +244,10 @@ export class PlatformAdapter {
 
   async getTrendingPlayers(type = 'add', hours = 24) {
     if (this.platform === 'sleeper') {
-      return await this.api.getTrendingPlayers(type, hours);
+      return await this.memo(
+        `trending:${type}:${hours}`,
+        () => this.api.getTrendingPlayers(type, hours)
+      );
     } else if (this.platform === 'espn') {
       // ESPN doesn't have trending data, return empty
       return [];

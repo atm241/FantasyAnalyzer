@@ -1,5 +1,6 @@
 import { POSITION_VALUE, isPlayerLikelyOut } from '../data/scoringConstants.js';
 import { isEliteOffense } from '../data/teamRankings.js';
+import { realPlayers } from '../utils/playerName.js';
 
 /**
  * Waiver wire analysis and recommendations
@@ -86,7 +87,7 @@ export class WaiverAnalyzer {
 
     // Count players by position
     const positionCounts = {};
-    const allPlayers = [...formatted.starters, ...formatted.bench];
+    const allPlayers = realPlayers([...formatted.starters, ...formatted.bench]);
 
     allPlayers.forEach(player => {
       positionCounts[player.position] = (positionCounts[player.position] || 0) + 1;

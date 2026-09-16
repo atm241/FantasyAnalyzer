@@ -1,5 +1,6 @@
 import { getBasePoints, getInjuryMultiplier } from '../data/scoringConstants.js';
 import { isEliteOffense, isWeakOffense, TEAM_MULTIPLIERS } from '../data/teamRankings.js';
+import { playerQuality } from '../data/playerQuality.js';
 
 /**
  * Lineup optimizer using projections and scoring rules
@@ -49,77 +50,22 @@ export class LineupOptimizer {
   }
 
   /**
-   * Get player quality multiplier based on name/team/situation
-   * This helps differentiate between elite, good, mediocre, and bad players
+   * Player quality multiplier.
+   *
+   * Derived from Sleeper's own signals rather than a hand-written name list:
+   * search_rank is their overall fantasy relevance ordering, and
+   * depth_chart_order says whether a player actually starts for their team.
+   * The previous version hardcoded ~80 names and went stale every season.
    */
   getPlayerQualityMultiplier(player) {
-    const name = player.name?.toLowerCase() || '';
-    const team = player.team;
-    const position = player.position;
-
-    // Elite tier players (1.3-1.5x multiplier)
-    const elitePlayers = [
-      'christian mccaffrey', 'bijan robinson', 'breece hall', 'jahmyr gibbs',
-      'derrick henry', 'jonathan taylor', 'saquon barkley', 'josh jacobs',
-      'tyreek hill', 'ceedee lamb', 'amon-ra st. brown', 'justin jefferson',
-      'stefon diggs', 'cooper kupp', 'puka nacua', 'garrett wilson',
-      'travis kelce', 'sam lachance', 'george kittle', 'tj hockenson',
-      'josh allen', 'lamar jackson', 'jalen hurts', 'patrick mahomes'
-    ];
-
-    // Good tier players (1.1-1.2x multiplier)
-    const goodPlayers = [
-      'tony pollard', 'devin singletary', 'rico dowdle', 'bucky irving',
-      'courtland sutton', 'dj moore', 'george pickens', 'josh downs',
-      'jayden reed', 'drake london', 'zay flowers', 'brian thomas',
-      'jonnu smith', 'dalton schultz', 'cole kmet', 'david njoku'
-    ];
-
-    // Below average tier (0.7-0.8x multiplier) - backups, bad situations
-    const belowAverage = [
-      // Backup RBs
-      'jerome ford', 'justice hill', 'roschon johnson', 'tyjae spears',
-      'elijah mitchell', 'ty chandler', 'alexander mattison', 'jaleel mclaughlin',
-      'bhayshul tuten', 'miles sanders', 'dameon pierce', 'zamir white',
-      'antonio gibson', 'ronnie rivers', 'pierre strong', 'hassan haskins',
-      'kendre miller', 'evan hull', 'joshua kelley', 'clyde edwards-helaire',
-      'rachaad white', 'chuba hubbard', 'tyler allgeier', 'ray davis',
-      // Backup/WR3-4 receivers
-      'tre tucker', 'josh reynolds', 'michael wilson', 'romeo doubs',
-      'calvin austin', 'jalen tolbert', 'tyler boyd', 'kendrick bourne',
-      'jalen mcmillan', 'ray-ray mccloud', 'marvin mims', 'tutu atwell'
-    ];
-
-    let multiplier = 1.0;
-
-    // Check player tier
-    if (elitePlayers.some(p => name.includes(p))) {
-      multiplier = 1.4;
-    } else if (goodPlayers.some(p => name.includes(p))) {
-      multiplier = 1.15;
-    } else if (belowAverage.some(p => name.includes(p))) {
-      multiplier = 0.75;
-    }
+    let multiplier = playerQuality(player);
 
     // Team quality modifier
+    const team = player?.team;
     if (isWeakOffense(team)) {
       multiplier *= TEAM_MULTIPLIERS.WEAK;
     } else if (isEliteOffense(team)) {
       multiplier *= TEAM_MULTIPLIERS.ELITE;
-    }
-
-    // Backup RBs and WR3+ get further penalty if not elite
-    if (position === 'RB' && multiplier < 1.1) {
-      // Additional penalty for known backups (common backup RB name patterns)
-      const backupPatterns = [
-        'hill', 'ford', 'mattison', 'tuten', 'spears', 'chandler',
-        'mitchell', 'sanders', 'pierce', 'white', 'gibson', 'rivers',
-        'strong', 'haskins', 'miller', 'hull', 'kelley', 'edwards-helaire',
-        'mclaughlin', 'johnson', 'hubbard', 'allgeier', 'davis'
-      ];
-      if (backupPatterns.some(pattern => name.includes(pattern))) {
-        multiplier *= 0.8;
-      }
     }
 
     return multiplier;
@@ -233,12 +179,23 @@ export class LineupOptimizer {
         const improvement = optimalPlayer.projection - currentPlayerProjection;
 
         if (improvement >= MIN_IMPROVEMENT) {
+          // The outgoing player is only really benched if the optimal lineup
+          // drops them. Otherwise they just shift to another slot, and calling
+          // that "bench" is wrong.
+          const outKeepsStarting = optimalStarterIds.has(currentPlayer.playerId);
+          const outMovesTo = outKeepsStarting
+            ? optimal.lineup.find(p => !p.empty && p.playerId === currentPlayer.playerId)?.slotPosition
+            : null;
+
           recommendations.push({
             type: 'swap',
             out: { ...currentPlayer, projection: currentPlayerProjection },
             in: optimalPlayer,
             improvement,
-            position: optimalPlayer.slotPosition
+            position: optimalPlayer.slotPosition,
+            fillsEmptySlot: Boolean(currentPlayer.emptySlot),
+            outKeepsStarting,
+            outMovesTo
           });
         }
       } else if (isOptimalPlayerInDifferentSlot) {
@@ -284,7 +241,38 @@ export class LineupOptimizer {
     // Sort recommendations by improvement (highest first)
     recommendations.sort((a, b) => b.improvement - a.improvement);
 
+    // Slot-by-slot diffs get confusing when a position has several slots (a
+    // player shuffling between two WR slots reads as a bench-and-start), and
+    // they miss players who join or leave without a one-to-one counterpart.
+    // The plan below is what actually has to happen.
+    const currentIds = new Set(
+      formatted.starters.filter(p => !p.emptySlot).map(p => p.playerId)
+    );
+    const optimalIds = new Set(
+      optimal.lineup.filter(p => !p.empty).map(p => p.playerId)
+    );
+
+    const lineupPlan = {
+      slots: formatted.starters.map((current, i) => {
+        const next = optimal.lineup[i] || { empty: true };
+        return {
+          slot: current.slotPosition || current.position,
+          current,
+          optimal: next,
+          changed: current.playerId !== next.playerId
+        };
+      }),
+      joining: optimal.lineup
+        .filter(p => !p.empty && !currentIds.has(p.playerId))
+        .sort((a, b) => b.projection - a.projection),
+      leaving: formatted.starters
+        .filter(p => !p.emptySlot && !optimalIds.has(p.playerId))
+        .map(p => ({ ...p, projection: this.projectionFor(p, scoringSettings) }))
+        .sort((a, b) => a.projection - b.projection)
+    };
+
     return {
+      lineupPlan,
       currentLineup: formatted.starters,
       optimalLineup: optimal.lineup,
       currentPoints,

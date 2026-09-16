@@ -1,6 +1,6 @@
 import { isOnBye, getByeWeek, loadSchedule } from '../data/nflSchedule.js';
 import { loadTeamRankings } from '../data/teamRankings.js';
-import { getPlayerName } from '../utils/playerName.js';
+import { getPlayerName, isEmptySlot } from '../utils/playerName.js';
 
 /**
  * Roster management and display
@@ -143,6 +143,26 @@ export class RosterService {
       : [];
 
     const describe = (playerId, slotPosition) => {
+      // Sleeper uses "0" for a starting slot left unfilled. It is not a player,
+      // and it is the most actionable thing on a roster, so it is marked rather
+      // than rendered as an unknown player.
+      if (isEmptySlot(playerId)) {
+        return {
+          playerId: null,
+          name: slotPosition ? `(empty ${slotPosition} slot)` : '(empty slot)',
+          position: slotPosition || 'N/A',
+          team: '--',
+          status: 'Empty',
+          injuryStatus: null,
+          onBye: false,
+          byeWeek: null,
+          realProjection: 0,
+          projected: true,
+          emptySlot: true,
+          ...(slotPosition ? { slotPosition } : {})
+        };
+      }
+
       const player = this.getPlayer(playerId);
       const team = player?.team || 'FA';
       const { projection, projected } = this.buildProjection(playerId, scoringSettings);
@@ -157,6 +177,10 @@ export class RosterService {
         byeWeek: getByeWeek(team),
         realProjection: projection,
         projected,
+        // Sleeper's own signals, used instead of hand-maintained name lists.
+        searchRank: player?.search_rank ?? null,
+        depthChartOrder: player?.depth_chart_order ?? null,
+        injuryBodyPart: player?.injury_body_part || null,
         ...(slotPosition ? { slotPosition } : {})
       };
     };
@@ -202,7 +226,10 @@ export class RosterService {
           status: player.status,
           injuryStatus: player.injury_status,
           onBye: isOnBye(team, currentWeek),
-          byeWeek: getByeWeek(team)
+          byeWeek: getByeWeek(team),
+          searchRank: player.search_rank ?? null,
+          depthChartOrder: player.depth_chart_order ?? null,
+          injuryBodyPart: player.injury_body_part || null
         });
       }
     }
