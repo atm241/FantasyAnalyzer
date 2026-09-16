@@ -18,21 +18,81 @@ import { getPlayerName } from './utils/playerName.js';
 let api, rosterService, optimizer, waiverAnalyzer, aiSummary, firstToGo, standings, tradeAnalyzer;
 const display = new DisplayFormatter();
 
+let promptInterface = null;
+let pendingAnswers = [];
+let bufferedLines = [];
+let inputClosed = false;
+
 /**
- * Prompt user for input
+ * Prompt user for input.
+ *
+ * Built on the 'line' event rather than readline.question(), which only fires
+ * once when stdin is a pipe - a second question would hang forever on piped
+ * input. Lines that arrive before anyone asks are buffered, and questions asked
+ * after end-of-input resolve empty instead of hanging.
  */
 function prompt(question) {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
-  });
-
-  return new Promise(resolve => {
-    rl.question(question, answer => {
-      rl.close();
-      resolve(answer);
+  if (!promptInterface) {
+    promptInterface = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      terminal: Boolean(process.stdin.isTTY)
     });
-  });
+
+    promptInterface.on('line', line => {
+      const resolve = pendingAnswers.shift();
+      if (resolve) resolve(line);
+      else bufferedLines.push(line);
+    });
+
+    promptInterface.on('close', () => {
+      inputClosed = true;
+      while (pendingAnswers.length) pendingAnswers.shift()('');
+    });
+  }
+
+  process.stdout.write(question);
+
+  if (bufferedLines.length) return Promise.resolve(bufferedLines.shift());
+  if (inputClosed) return Promise.resolve('');
+  return new Promise(resolve => pendingAnswers.push(resolve));
+}
+
+/** Release stdin so the process can exit once intake is finished. */
+function closePrompt() {
+  promptInterface?.close();
+  promptInterface = null;
+  pendingAnswers = [];
+  bufferedLines = [];
+}
+
+const PLATFORMS = ['sleeper', 'espn'];
+
+/**
+ * Ask which platform to use. Only reached when --platform was not supplied,
+ * so scripted runs keep working unchanged.
+ */
+async function selectPlatform() {
+  console.log('Which platform is your league on?\n');
+  console.log('1. Sleeper');
+  console.log('2. ESPN');
+
+  // Bounded so a closed stdin (piped or redirected input that ran out) cannot
+  // spin forever re-asking a question nobody can answer.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const answer = (await prompt('\nSelect a platform (enter number): ')).trim().toLowerCase();
+
+    if (answer === '1' || answer === 'sleeper') return 'sleeper';
+    if (answer === '2' || answer === 'espn') return 'espn';
+
+    console.log(
+      answer === ''
+        ? 'Please choose 1 or 2.'
+        : `'${answer}' is not one of the options - enter 1 or 2.`
+    );
+  }
+
+  return null;
 }
 
 /**
@@ -259,16 +319,35 @@ program
   .name('fantasy-analyzer')
   .description('Fantasy football lineup optimizer and waiver wire analyzer for Sleeper and ESPN')
   .version('1.0.0')
-  .option('-p, --platform <platform>', 'Platform: sleeper or espn (default: sleeper)', 'sleeper')
+  .option('-p, --platform <platform>', 'Platform: sleeper or espn (prompts if omitted)')
   .option('-u, --username <username>', 'Your username (Sleeper only)')
   .option('-l, --league <leagueId>', 'League ID')
   .option('--espn-s2 <espnS2>', 'ESPN S2 cookie (for private leagues)')
   .option('--swid <swid>', 'ESPN SWID cookie (for private leagues)')
   .option('-s, --season <season>', 'Season year (defaults to the current NFL season)', String(getCurrentSeasonYear()))
   .action(async (options) => {
-    const platform = options.platform.toLowerCase();
+    console.log('Welcome to Fantasy Analyzer!\n');
 
-    console.log(`Welcome to Fantasy Analyzer (${platform.toUpperCase()})!\n`);
+    let platform = options.platform?.trim().toLowerCase();
+
+    if (!platform) {
+      platform = await selectPlatform();
+
+      if (!platform) {
+        display.displayError('No platform selected. Re-run with --platform sleeper or --platform espn.');
+        closePrompt();
+        process.exitCode = 1;
+        return;
+      }
+    } else if (!PLATFORMS.includes(platform)) {
+      display.displayError(
+        `Unknown platform '${options.platform}'. Choose one of: ${PLATFORMS.join(', ')}.`
+      );
+      process.exitCode = 1;
+      return;
+    }
+
+    console.log(`\nUsing ${platform.toUpperCase()}\n`);
 
     // Initialize platform adapter
     const config = {
@@ -311,7 +390,11 @@ program
     standings = new StandingsAnalyzer(api, rosterService);
     tradeAnalyzer = new TradeAnalyzer(rosterService);
 
-    await runAnalyzer(options.username, options.league);
+    try {
+      await runAnalyzer(options.username, options.league);
+    } finally {
+      closePrompt();
+    }
   });
 
 program.parse();

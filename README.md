@@ -48,6 +48,25 @@ missing, incomplete, or more than a season out of date.
 
 ## Usage
 
+Run it with no arguments and it asks which platform your league is on, then
+walks you through the rest:
+
+```bash
+npm start
+```
+
+```
+Which platform is your league on?
+
+1. Sleeper
+2. ESPN
+
+Select a platform (enter number):
+```
+
+Pass `--platform` to skip that question (useful in scripts). Everything below
+is optional - anything you leave out is prompted for.
+
 ### Sleeper League
 
 ```bash
