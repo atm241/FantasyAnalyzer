@@ -9,13 +9,17 @@ import { AISummaryService } from './services/aiSummary.js';
 import { FirstToGoAnalyzer } from './services/firstToGo.js';
 import { StandingsAnalyzer } from './services/standings.js';
 import { TradeAnalyzer } from './services/tradeAnalyzer.js';
+import { MatchupService } from './services/matchup.js';
 import { DisplayFormatter } from './display/formatter.js';
 import readline from 'readline';
 import { getCurrentSeasonYear } from './data/nflSchedule.js';
 import { getRankingsSeason } from './data/teamRankings.js';
 import { getPlayerName } from './utils/playerName.js';
+import {
+  getSavedLeagues, rememberLeague, forgetLeague, describeLeague, CONFIG_PATH
+} from './utils/savedLeagues.js';
 
-let api, rosterService, optimizer, waiverAnalyzer, aiSummary, firstToGo, standings, tradeAnalyzer;
+let api, rosterService, optimizer, waiverAnalyzer, aiSummary, firstToGo, standings, tradeAnalyzer, matchupService;
 const display = new DisplayFormatter();
 
 let promptInterface = null;
@@ -67,6 +71,65 @@ function closePrompt() {
 }
 
 const PLATFORMS = ['sleeper', 'espn'];
+
+/**
+ * Pick from the leagues remembered on this machine, or add another.
+ *
+ * Returns a saved entry, the string 'new' to run the normal intake, or null if
+ * nothing could be chosen.
+ */
+async function selectSavedLeague() {
+  const saved = getSavedLeagues();
+  if (saved.length === 0) return 'new';
+
+  console.log('Your saved leagues:\n');
+  saved.forEach((entry, idx) => console.log(`${idx + 1}. ${describeLeague(entry)}`));
+  console.log(`${saved.length + 1}. Add another league`);
+  console.log(`${saved.length + 2}. Remove a saved league`);
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const answer = (await prompt('\nSelect (enter number): ')).trim();
+    const choice = Number(answer);
+
+    if (Number.isInteger(choice) && choice >= 1 && choice <= saved.length) {
+      return saved[choice - 1];
+    }
+    if (choice === saved.length + 1) return 'new';
+    if (choice === saved.length + 2) {
+      const which = Number((await prompt('Remove which number? ')).trim());
+      if (Number.isInteger(which) && which >= 1 && which <= saved.length) {
+        forgetLeague(which - 1);
+        console.log(`Removed ${describeLeague(saved[which - 1])}.`);
+      }
+      return selectSavedLeague();
+    }
+
+    console.log(`Enter a number between 1 and ${saved.length + 2}.`);
+  }
+
+  return null;
+}
+
+/**
+ * Collect ESPN cookies for a private league.
+ *
+ * ESPN has no public read for private leagues, so these are required; the tool
+ * cannot work around it. Returns null if the user declines.
+ */
+async function promptForEspnCookies(leagueId) {
+  console.log(`\nESPN league ${leagueId} is private, so it needs your browser cookies to read.`);
+  console.log('To find them: log in to ESPN Fantasy, open DevTools (F12),');
+  console.log('then Application > Cookies > https://fantasy.espn.com and copy');
+  console.log('the values of `espn_s2` and `SWID`.\n');
+
+  const espnS2 = (await prompt('espn_s2 (leave blank to skip): ')).trim();
+  if (!espnS2) return null;
+
+  const swid = (await prompt('SWID: ')).trim();
+  if (!swid) return null;
+
+  return { espn_s2: espnS2, SWID: swid };
+}
 
 /**
  * Ask which platform to use. Only reached when --platform was not supplied,
@@ -167,6 +230,23 @@ async function runAnalyzer(username, leagueId) {
 
     display.displaySuccess(`Analyzing league: ${league.name}`);
 
+    // Now that a specific league is known, remember it by name so the next run
+    // can jump straight to it instead of re-listing every league on the account.
+    const isNew = rememberLeague({
+      platform: api.platform,
+      leagueId: league.league_id,
+      name: league.name,
+      username: api.platform === 'sleeper' ? username : null,
+      season: league.season || null,
+      ...(api.config?.cookies
+        ? { espnS2: api.config.cookies.espn_s2, swid: api.config.cookies.SWID }
+        : {})
+    });
+
+    if (isNew) {
+      console.log(`Saved "${league.name}" for next time (${CONFIG_PATH}).`);
+    }
+
     // Get and display current week
     const currentWeek = await rosterService.getCurrentWeek();
     await rosterService.ensureSeasonData();
@@ -253,6 +333,12 @@ async function runAnalyzer(username, leagueId) {
       return;
     }
 
+    // This week's head-to-head, before the roster detail
+    const matchup = await matchupService
+      .getCurrentMatchup(league.league_id, user.user_id)
+      .catch(() => null);
+    display.displayMatchup(matchup);
+
     // Display current roster
     const formatted = await rosterService.formatRoster(roster, league.league_id);
     display.displayRoster(formatted);
@@ -264,7 +350,7 @@ async function runAnalyzer(username, leagueId) {
 
     // Analyze roster needs
     display.displayInfo('Analyzing roster depth...');
-    const rosterNeeds = await waiverAnalyzer.analyzeRosterNeeds(league.league_id, roster);
+    const rosterNeeds = await waiverAnalyzer.analyzeRosterNeeds(league.league_id, roster, user.user_id);
     display.displayRosterNeeds(rosterNeeds);
 
     // Show trending available players
@@ -276,7 +362,7 @@ async function runAnalyzer(username, leagueId) {
 
     // Show top available by position
     display.displayInfo('Finding best available players...');
-    const topAvailable = await waiverAnalyzer.getTopAvailable(league.league_id, 5);
+    const topAvailable = await waiverAnalyzer.getTopAvailable(league.league_id, 5, roster);
     display.displayWaiverRecommendations(topAvailable, 5);
 
     // Analyze First to Go (droppable/tradeable players)
@@ -310,8 +396,22 @@ async function runAnalyzer(username, leagueId) {
     console.log('='.repeat(70) + '\n');
 
   } catch (error) {
+    // A private ESPN league without working cookies is a setup problem, not a
+    // crash: say what to do rather than printing a page of request internals.
+    if (error?.needsCookies) {
+      display.displayError(error.message);
+      console.log('\nSaved cookies may also have expired - ESPN rotates them periodically.');
+      console.log('Re-run and supply them with:');
+      console.log(`  npm start -- --platform espn --league ${error.leagueId} --espn-s2 "..." --swid "..."`);
+      console.log('or delete the saved entry and add the league again.');
+      process.exitCode = 1;
+      return;
+    }
+
     display.displayError(`Analysis failed: ${error.message}`);
-    console.error(error);
+    if (process.env.DEBUG) console.error(error);
+    else console.log('Run again with DEBUG=1 for the full stack trace.');
+    process.exitCode = 1;
   }
 }
 
@@ -331,6 +431,33 @@ program
     console.log('Welcome to Fantasy Analyzer!\n');
 
     let platform = options.platform?.trim().toLowerCase();
+    let chosen = null;
+
+    // Offer remembered leagues first, unless the run was fully specified.
+    if (!platform && !options.league && !options.username) {
+      const pick = await selectSavedLeague();
+
+      if (pick && pick !== 'new') {
+        chosen = pick;
+        platform = pick.platform;
+        options.league = pick.leagueId || options.league;
+        options.username = pick.username || options.username;
+        options.espnS2 = pick.espnS2 || options.espnS2;
+        options.swid = pick.swid || options.swid;
+        console.log(`\nLoading ${describeLeague(pick)}`);
+
+        // Saved before cookies were supported, or saved as public and it is not.
+        if (platform === 'espn' && !(options.espnS2 && options.swid)) {
+          const cookies = await promptForEspnCookies(options.league);
+          if (cookies) {
+            options.espnS2 = cookies.espn_s2;
+            options.swid = cookies.SWID;
+            rememberLeague({ ...pick, espnS2: cookies.espn_s2, swid: cookies.SWID });
+            console.log('Saved those cookies for next time.\n');
+          }
+        }
+      }
+    }
 
     if (!platform) {
       platform = await selectPlatform();
@@ -372,6 +499,21 @@ program
         config.leagueId = options.league;
       }
 
+      // Private leagues cannot be read at all without cookies, so offer them
+      // during setup instead of failing with a 401 on the first request. A
+      // league loaded from the saved list has already been asked.
+      if (!config.cookies && !chosen) {
+        const answer = (await prompt('Is this a private league? [y/N] ')).trim().toLowerCase();
+        if (answer === 'y' || answer === 'yes') {
+          const cookies = await promptForEspnCookies(options.league);
+          if (cookies) {
+            config.cookies = cookies;
+            options.espnS2 = cookies.espn_s2;
+            options.swid = cookies.SWID;
+          }
+        }
+      }
+
       // ESPN doesn't use username, so create a placeholder
       if (!options.username) {
         options.username = await prompt('Enter your team name or identifier: ');
@@ -392,6 +534,7 @@ program
     firstToGo = new FirstToGoAnalyzer(rosterService);
     standings = new StandingsAnalyzer(api, rosterService);
     tradeAnalyzer = new TradeAnalyzer(rosterService);
+    matchupService = new MatchupService(api, rosterService, optimizer);
 
     try {
       await runAnalyzer(options.username, options.league);

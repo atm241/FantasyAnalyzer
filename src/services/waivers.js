@@ -10,6 +10,82 @@ export class WaiverAnalyzer {
   constructor(rosterService, api) {
     this.rosterService = rosterService;
     this.api = api;
+    this.budget = null;
+  }
+
+  /**
+   * FAAB position: what the league allows and what you have left to spend.
+   * Returns null for leagues that do not use a bidding budget.
+   */
+  async getWaiverBudget(leagueId, userId) {
+    if (this.budget !== null) return this.budget;
+
+    const league = await this.api.getLeague(leagueId);
+    const settings = league?.settings || {};
+
+    // Sleeper waiver_type 2 is FAAB bidding.
+    if (settings.waiver_type !== 2 || !settings.waiver_budget) {
+      this.budget = false;
+      return this.budget;
+    }
+
+    const rosters = await this.api.getLeagueRosters(leagueId);
+    const mine = rosters.find(r => r.owner_id === userId);
+    const spent = mine?.settings?.waiver_budget_used || 0;
+
+    this.budget = {
+      total: settings.waiver_budget,
+      spent,
+      remaining: Math.max(settings.waiver_budget - spent, 0)
+    };
+    return this.budget;
+  }
+
+  /**
+   * Suggested FAAB bid for a target.
+   *
+   * Priced off the points the player adds over the best free alternative at
+   * their position, across the weeks left to play - so a genuine starter costs
+   * real budget and a one-week streamer costs a dollar.
+   */
+  suggestBid(player, economics, budget, weeksRemaining = 12) {
+    if (!budget || budget.remaining <= 0) return null;
+
+    const economy = economics?.[player.position];
+    if (!economy || economy.idealCount === 0) return { amount: 0, note: 'not startable in this league' };
+
+    // Priced against the player they would actually displace in your lineup,
+    // not against the best free agent - the top target is that free agent, so
+    // that comparison is always zero.
+    const weeklyEdge = (player.realProjection ?? 0) - economy.incumbent;
+
+    // Nothing gained over a free agent you could add for nothing.
+    if (weeklyEdge <= 0.5 || economy.streamable) {
+      return {
+        amount: Math.min(1, budget.remaining),
+        note: economy.streamable ? 'minimum bid - streamable position' : 'minimum bid - no real upgrade'
+      };
+    }
+
+    const seasonEdge = weeklyEdge * Math.max(weeksRemaining, 1);
+
+    // Share of the remaining budget, capped so one add cannot spend the season.
+    const share = Math.min(seasonEdge / 120, 0.35);
+    const amount = Math.max(1, Math.round(budget.remaining * share));
+
+    return {
+      amount: Math.min(amount, budget.remaining),
+      note: `+${weeklyEdge.toFixed(1)} pts/wk over your marginal starter`
+    };
+  }
+
+  /**
+   * Rank by waiver score, breaking ties on the projection behind it. Scores are
+   * whole numbers, so without this a 0.2-point edge disappears in rounding.
+   */
+  static byWaiverValue(a, b) {
+    if (b.waiverScore !== a.waiverScore) return b.waiverScore - a.waiverScore;
+    return (b.realProjection ?? 0) - (a.realProjection ?? 0);
   }
 
   /**
@@ -37,7 +113,7 @@ export class WaiverAnalyzer {
       // Points above the best free alternative at this position, scaled so a
       // couple of points of edge is worth a meaningful amount of score.
       const edge = (player.realProjection ?? 0) - position.replacement;
-      score += Math.max(-20, Math.min(30, edge * 3));
+      score += Math.max(-25, Math.min(30, edge * 5));
 
       // How much this league needs the position at all.
       score += Math.min(15, position.priority * 4);
@@ -57,13 +133,18 @@ export class WaiverAnalyzer {
     if (player.injuryStatus === 'Doubtful') score -= 15;
     if (isPlayerLikelyOut(player.injuryStatus)) score -= 30;
 
-    // Trending bonus
+    // Trending is a popularity signal, not a value one: it says other managers
+    // are adding the player, which is worth a nudge but must not outrank a
+    // materially better projection.
     if (trending) {
-      score += 20;
+      score += 5;
     }
 
-    // Team matters (players on good teams score more)
-    if (isEliteOffense(player.team)) {
+    // Team quality is only applied when there is no real projection to lean on.
+    // A projection already prices in the offence a player plays for, so adding
+    // a bonus on top double-counts it - it was ranking an 8.2 receiver on a good
+    // offence above an 8.5 receiver on an average one.
+    if (player.realProjection == null && isEliteOffense(player.team)) {
       score += 5;
     }
 
@@ -73,9 +154,11 @@ export class WaiverAnalyzer {
   /**
    * Find best available players at each position
    */
-  async getTopAvailable(leagueId, limit = 10) {
+  async getTopAvailable(leagueId, limit = 10, roster = null) {
     const positions = FANTASY_POSITIONS;
-    const economics = await this.rosterService.getEconomics(leagueId);
+    // Same economics the needs analysis uses, so both rank against your own
+    // lineup rather than two different baselines.
+    const economics = await this.rosterService.getEconomics(leagueId, roster);
     const trending = await this.api.getTrendingPlayers('add', 24);
     const trendingIds = new Set(trending.map(t => t.player_id));
 
@@ -90,7 +173,7 @@ export class WaiverAnalyzer {
         trending: trendingIds.has(player.playerId)
       }));
 
-      scored.sort((a, b) => b.waiverScore - a.waiverScore);
+      scored.sort(WaiverAnalyzer.byWaiverValue);
       recommendations[position] = scored.slice(0, limit);
     }
 
@@ -100,7 +183,7 @@ export class WaiverAnalyzer {
   /**
    * Analyze roster weaknesses and suggest pickups
    */
-  async analyzeRosterNeeds(leagueId, roster) {
+  async analyzeRosterNeeds(leagueId, roster, userId = null) {
     const formatted = await this.rosterService.formatRoster(roster, leagueId);
     const rosterPositions = await this.rosterService.getRosterPositions(leagueId);
 
@@ -145,6 +228,10 @@ export class WaiverAnalyzer {
 
     weakPositions.sort((a, b) => b.priority - a.priority);
 
+    const budget = userId ? await this.getWaiverBudget(leagueId, userId) : null;
+    const { week } = await this.rosterService.getNFLState();
+    const weeksRemaining = Math.max(18 - week, 1);
+
     // Get trending data once (performance optimization - avoid repeated API calls)
     const trending = await this.api.getTrendingPlayers('add', 24).catch(() => []);
     const trendingIds = new Set(trending.map(t => t.player_id));
@@ -160,15 +247,19 @@ export class WaiverAnalyzer {
         trending: trendingIds.has(player.playerId)
       }));
 
-      scored.sort((a, b) => b.waiverScore - a.waiverScore);
-      targetedPickups[weakness.position] = scored.slice(0, 5);
+      scored.sort(WaiverAnalyzer.byWaiverValue);
+      targetedPickups[weakness.position] = scored.slice(0, 5).map(player => ({
+        ...player,
+        bid: this.suggestBid(player, economics, budget, weeksRemaining)
+      }));
     }
 
     return {
       weakPositions,
       targetedPickups,
       positionCounts,
-      economics
+      economics,
+      budget
     };
   }
 

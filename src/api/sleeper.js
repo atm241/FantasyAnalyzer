@@ -14,6 +14,7 @@ const LIVE_PLAYER_FIELDS = [
 
 const PLAYERS_CACHE_KEY = 'sleeper-players';
 const PLAYERS_CACHE_HOURS = 24;
+const PROJECTION_RANGE_CACHE_HOURS = 12;
 
 /** The only player fields this tool reads. */
 const PLAYER_FIELDS = [
@@ -160,6 +161,37 @@ export class SleeperAPI {
     }
 
     return { stats, players };
+  }
+
+  /**
+   * Projected points for a range of weeks, keyed by player id.
+   *
+   * Uses the stats-only feed: future weeks need points, not player records, and
+   * the record-carrying variant is four times the size per week. Cached on disk
+   * because next month's projections do not move minute to minute.
+   */
+  async getProjectionRange(season, fromWeek, toWeek) {
+    const cacheKey = `sleeper-projections-${season}-${fromWeek}-${toWeek}`;
+    const cached = readCache(cacheKey, PROJECTION_RANGE_CACHE_HOURS);
+    if (cached) return cached;
+
+    const weeks = [];
+    for (let week = fromWeek; week <= toWeek; week++) weeks.push(week);
+
+    const results = await Promise.all(
+      weeks.map(week =>
+        axios
+          .get(`${this.baseURL}/projections/nfl/regular/${season}/${week}`)
+          .then(response => ({ week, stats: response.data || {} }))
+          .catch(() => ({ week, stats: {} }))
+      )
+    );
+
+    const byWeek = {};
+    for (const { week, stats } of results) byWeek[week] = stats;
+
+    writeCache(cacheKey, byWeek);
+    return byWeek;
   }
 
   async getMatchups(leagueId, week) {

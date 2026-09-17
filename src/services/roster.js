@@ -3,6 +3,9 @@ import { loadTeamRankings } from '../data/teamRankings.js';
 import { getPlayerName, isEmptySlot, realPlayers } from '../utils/playerName.js';
 import { buildPositionEconomics, FANTASY_POSITIONS } from './positionValue.js';
 
+/** Last week of the NFL regular season. */
+const REGULAR_SEASON_END = 18;
+
 /**
  * Roster management and display
  */
@@ -13,6 +16,7 @@ export class RosterService {
     this.nflState = null;
     this.projections = null;
     this.economicsCache = new Map();
+    this.rosOutlook = null;
   }
 
   /**
@@ -311,6 +315,76 @@ export class RosterService {
     }
 
     return available;
+  }
+
+  /**
+   * Real rest-of-season outlook, per player id.
+   *
+   * Sums this league's scoring across every remaining regular-season week and
+   * separately across the fantasy playoff weeks, using the same projections the
+   * lineup optimiser uses. Replaces a base-points guess times a hardcoded
+   * "about eight weeks left", which ignored schedule, byes and form.
+   */
+  async getRestOfSeasonOutlook(leagueId) {
+    if (this.rosOutlook) return this.rosOutlook;
+
+    const { season, week } = await this.getNFLState();
+    const league = await this.api.getLeague(leagueId);
+    const scoringSettings = await this.getScoringSettings(leagueId);
+
+    const playoffStart = league?.settings?.playoff_week_start || 15;
+    const lastWeek = Math.max(playoffStart + 2, REGULAR_SEASON_END);
+
+    const byWeek = await this.api.getProjectionRange(season, week, lastWeek);
+
+    const outlook = {};
+    const weeksCounted = [];
+    const playoffWeeks = [];
+
+    for (const [weekNumber, stats] of Object.entries(byWeek)) {
+      const number = Number(weekNumber);
+      const isPlayoff = number >= playoffStart;
+      if (isPlayoff) playoffWeeks.push(number);
+      else weeksCounted.push(number);
+
+      for (const [playerId, line] of Object.entries(stats || {})) {
+        const points = this.pointsFor(line, scoringSettings);
+        if (points == null) continue;
+
+        const entry = (outlook[playerId] ||= {
+          restOfSeason: 0, playoff: 0, weeksProjected: 0, playoffWeeksProjected: 0
+        });
+
+        if (isPlayoff) {
+          entry.playoff += points;
+          entry.playoffWeeksProjected++;
+        } else {
+          entry.restOfSeason += points;
+          entry.weeksProjected++;
+        }
+      }
+    }
+
+    this.rosOutlook = {
+      players: outlook,
+      fromWeek: week,
+      playoffStart,
+      regularWeeks: weeksCounted.length,
+      playoffWeeks: playoffWeeks.length
+    };
+    return this.rosOutlook;
+  }
+
+  /** Points for one projected stat line under this league's scoring. */
+  pointsFor(stats, scoringSettings) {
+    if (!stats) return null;
+    const reception = scoringSettings?.rec ?? 0;
+    const points = reception >= 1
+      ? stats.pts_ppr
+      : reception >= 0.5
+        ? stats.pts_half_ppr
+        : stats.pts_std;
+    return points ?? stats.pts_ppr ?? stats.pts_half_ppr ?? stats.pts_std ?? null;
   }
 
   /**

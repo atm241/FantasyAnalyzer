@@ -63,6 +63,11 @@ export class TradeAnalyzer {
   /**
    * Calculate player trade value based on projections and scarcity
    */
+  /** Projected points across the fantasy playoff weeks. */
+  playoffPoints(player) {
+    return Math.round(this.outlook?.players?.[player.playerId]?.playoff ?? 0);
+  }
+
   calculatePlayerTradeValue(player, positionDepth, isStarter = false) {
     let value = 50; // Base value
 
@@ -110,6 +115,7 @@ export class TradeAnalyzer {
     const allUsers = await this.rosterService.api.getLeagueUsers(leagueId);
     const allPlayers = await this.rosterService.loadPlayers();
     this.economics = await this.rosterService.getEconomics(leagueId, yourRoster);
+    this.outlook = await this.rosterService.getRestOfSeasonOutlook(leagueId);
 
     // Analyze your team's needs
     const yourNeeds = this.calculateTeamNeeds(yourRoster, this.economics);
@@ -269,7 +275,8 @@ export class TradeAnalyzer {
             yourNeeds.positionDepth,
             yourRoster.starters.some(s => s.playerId === p.playerId)
           ),
-          restOfSeasonPoints: this.estimateRestOfSeasonPoints(p, 8) // ~8 weeks left
+          restOfSeasonPoints: this.estimateRestOfSeasonPoints(p),
+          playoffPoints: this.playoffPoints(p)
         }))
         .sort((a, b) => b.tradeValue - a.tradeValue);
 
@@ -314,7 +321,8 @@ export class TradeAnalyzer {
               theirNeeds.positionDepth,
               theirRoster.starters.some(s => s.playerId === p.playerId)
             ),
-            restOfSeasonPoints: this.estimateRestOfSeasonPoints(p, 8)
+            restOfSeasonPoints: this.estimateRestOfSeasonPoints(p),
+            playoffPoints: this.playoffPoints(p)
           }))
           .sort((a, b) => b.tradeValue - a.tradeValue);
 
@@ -388,26 +396,20 @@ export class TradeAnalyzer {
   /**
    * Estimate rest of season points for a player
    */
-  estimateRestOfSeasonPoints(player, weeksRemaining = 8) {
-    // Base weekly points by position
-    let weeklyPoints = getBasePoints(player.position);
+  estimateRestOfSeasonPoints(player, weeksRemaining = null) {
+    // Real projections for every remaining week, summed under this league's
+    // scoring. Byes are naturally excluded - a player has no line that week.
+    const projected = this.outlook?.players?.[player.playerId];
+    if (projected) {
+      return Math.round(projected.restOfSeason + projected.playoff);
+    }
 
-    // Apply position scarcity multiplier
-    weeklyPoints *= (POSITION_SCARCITY[player.position] || 1.0);
+    // No projection at all: the feed omits players it does not expect to play.
+    if (this.rosterService?.hasProjections?.()) return 0;
 
-    // Team quality
-    if (isEliteOffense(player.team)) weeklyPoints *= TEAM_MULTIPLIERS.ELITE;
-    if (isWeakOffense(player.team)) weeklyPoints *= TEAM_MULTIPLIERS.WEAK;
-
-    // Injury penalty
-    if (player.injuryStatus === 'Out') weeklyPoints *= 0.3;
-    if (player.injuryStatus === 'Doubtful') weeklyPoints *= 0.5;
-    if (player.injuryStatus === 'Questionable') weeklyPoints *= 0.9;
-
-    // Account for potential bye week in remaining weeks
-    const byeWeekAdjustment = (weeksRemaining - 1) / weeksRemaining;
-
-    return Math.round(weeklyPoints * weeksRemaining * byeWeekAdjustment);
+    // Only reached when the projection feed is unavailable entirely.
+    const weeks = weeksRemaining || 8;
+    return Math.round(getBasePoints(player.position) * weeks);
   }
 
   /**
@@ -443,14 +445,14 @@ export class TradeAnalyzer {
           lines.push('  📤 You Give:');
           proposal.youGive.forEach(p => {
             lines.push(`     - ${p.name} (${p.position}) ${p.team}`);
-            lines.push(`       Value: ${p.tradeValue} | ROS Points: ${p.restOfSeasonPoints}`);
+            lines.push(`       Value: ${p.tradeValue} | ROS: ${p.restOfSeasonPoints} pts | Playoffs (wk ${this.outlook?.playoffStart ?? 15}+): ${p.playoffPoints}`);
           });
 
           // What you get
           lines.push('  📥 You Get:');
           proposal.youGet.forEach(p => {
             lines.push(`     - ${p.name} (${p.position}) ${p.team}`);
-            lines.push(`       Value: ${p.tradeValue} | ROS Points: ${p.restOfSeasonPoints}`);
+            lines.push(`       Value: ${p.tradeValue} | ROS: ${p.restOfSeasonPoints} pts | Playoffs (wk ${this.outlook?.playoffStart ?? 15}+): ${p.playoffPoints}`);
           });
 
           // Trade evaluation

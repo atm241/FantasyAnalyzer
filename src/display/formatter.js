@@ -34,6 +34,49 @@ export class DisplayFormatter {
   }
 
   /**
+   * Display this week's head-to-head matchup
+   */
+  displayMatchup(matchup) {
+    if (!matchup) return;
+
+    const { you, opponent, week } = matchup;
+    console.log('\n' + chalk.bold.cyan('='.repeat(70)));
+    console.log(chalk.bold.cyan(`WEEK ${week} MATCHUP`));
+    console.log(chalk.bold.cyan('='.repeat(70)));
+
+    const chance = Math.round(matchup.winProbability * 100);
+    const tint = chance >= 60 ? chalk.green : chance >= 40 ? chalk.yellow : chalk.red;
+
+    console.log(
+      `\n${chalk.bold(you.teamName)} (${you.record})  ` +
+      `${chalk.bold.green(you.projected.toFixed(1))}` +
+      `  vs  ${chalk.bold.red(opponent.projected.toFixed(1))}  ` +
+      `${chalk.bold(opponent.teamName)} (${opponent.record})`
+    );
+
+    const margin = matchup.margin;
+    console.log(
+      `\nProjected margin: ${margin >= 0 ? chalk.green('+' + margin.toFixed(1)) : chalk.red(margin.toFixed(1))}` +
+      `   Win probability: ${tint.bold(chance + '%')}`
+    );
+
+    if (you.actual || opponent.actual) {
+      console.log(chalk.gray(`Points so far: ${you.actual.toFixed(1)} - ${opponent.actual.toFixed(1)}`));
+    }
+
+    console.log('\n' + chalk.gray('  Your best       ') + chalk.gray('Their best'));
+    for (let i = 0; i < 3; i++) {
+      const a = you.topPlayers[i];
+      const b = opponent.topPlayers[i];
+      const left = a ? `${a.name} ${a.projection.toFixed(1)}` : '';
+      const right = b ? `${b.name} ${b.projection.toFixed(1)}` : '';
+      console.log(`  ${left.padEnd(28)}${right}`);
+    }
+
+    console.log('\n' + chalk.bold.cyan('='.repeat(70)) + '\n');
+  }
+
+  /**
    * Display lineup optimization results
    */
   displayLineupAnalysis(analysis) {
@@ -149,6 +192,13 @@ export class DisplayFormatter {
         );
       }
 
+      if (analysis.budget) {
+        console.log(
+          '\n' + chalk.bold(`FAAB: $${analysis.budget.remaining} of $${analysis.budget.total} left`) +
+          chalk.gray(` ($${analysis.budget.spent} spent)`)
+        );
+      }
+
       console.log('\n' + chalk.bold.green('Targeted Pickups:'));
       for (const [position, players] of Object.entries(analysis.targetedPickups)) {
         console.log(`\n${chalk.bold.yellow(position)}:`);
@@ -159,7 +209,12 @@ export class DisplayFormatter {
             if (player && player.name) {
               const status = this.getStatusIndicator(player);
               const score = chalk.cyan(`[${player.waiverScore}]`);
-              console.log(`${idx + 1}. ${player.name.padEnd(25)} ${(player.team || 'FA').padEnd(4)} ${status} ${score}`);
+              const bid = player.bid
+                ? '  ' + chalk.bold.green(`bid $${player.bid.amount}`) + chalk.gray(` (${player.bid.note})`)
+                : '';
+              console.log(
+                `${idx + 1}. ${player.name.padEnd(25)} ${(player.team || 'FA').padEnd(4)} ${status} ${score}${bid}`
+              );
             }
           });
         }

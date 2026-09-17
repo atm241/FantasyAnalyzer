@@ -6,6 +6,31 @@ const ESPN_BASE_URL = 'https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/s
 /**
  * ESPN Fantasy Football API Client
  */
+/**
+ * ESPN answers 401 for a private league read without cookies, and 404 for a
+ * league id that does not exist. Raw axios errors bury that behind a wall of
+ * request internals, so they are translated here.
+ */
+export class EspnAuthError extends Error {
+  constructor(leagueId) {
+    super(
+      `ESPN league ${leagueId} is private. It needs your espn_s2 and SWID cookies to read.`
+    );
+    this.name = 'EspnAuthError';
+    this.leagueId = leagueId;
+    this.needsCookies = true;
+  }
+}
+
+function translateEspnError(error, leagueId) {
+  const status = error?.response?.status;
+  if (status === 401 || status === 403) return new EspnAuthError(leagueId);
+  if (status === 404) {
+    return new Error(`ESPN league ${leagueId} was not found. Check the league ID.`);
+  }
+  return error;
+}
+
 export class EspnAPI {
   constructor() {
     this.baseURL = ESPN_BASE_URL;
@@ -28,12 +53,15 @@ export class EspnAPI {
       };
     }
 
-    const response = await axios.get(
-      `${this.baseURL}/${seasonId}/segments/0/leagues/${leagueId}`,
-      config
-    );
-
-    return response.data;
+    try {
+      const response = await axios.get(
+        `${this.baseURL}/${seasonId}/segments/0/leagues/${leagueId}`,
+        config
+      );
+      return response.data;
+    } catch (error) {
+      throw translateEspnError(error, leagueId);
+    }
   }
 
   /**
@@ -53,12 +81,15 @@ export class EspnAPI {
       };
     }
 
-    const response = await axios.get(
-      `${this.baseURL}/${seasonId}/segments/0/leagues/${leagueId}`,
-      config
-    );
-
-    return response.data;
+    try {
+      const response = await axios.get(
+        `${this.baseURL}/${seasonId}/segments/0/leagues/${leagueId}`,
+        config
+      );
+      return response.data;
+    } catch (error) {
+      throw translateEspnError(error, leagueId);
+    }
   }
 
   /**

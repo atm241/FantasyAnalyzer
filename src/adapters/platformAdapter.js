@@ -248,6 +248,17 @@ export class PlatformAdapter {
     return { stats: {}, players: {} };
   }
 
+  /** Projections for a span of weeks, for rest-of-season value. */
+  async getProjectionRange(season, fromWeek, toWeek) {
+    if (this.platform === 'sleeper') {
+      return await this.memo(
+        `projrange:${season}:${fromWeek}:${toWeek}`,
+        () => this.api.getProjectionRange(season, fromWeek, toWeek)
+      );
+    }
+    return {};
+  }
+
   async getTrendingPlayers(type = 'add', hours = 24) {
     if (this.platform === 'sleeper') {
       return await this.memo(

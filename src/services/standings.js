@@ -1,6 +1,38 @@
 /**
  * League standings and playoff probability analysis
  */
+/**
+ * Deterministic pseudo-random generator (mulberry32).
+ *
+ * The playoff probability used to move by several points between identical
+ * runs, which made it look like the league had changed when nothing had. The
+ * simulation is seeded from the league state instead, so the same inputs always
+ * produce the same number.
+ */
+function seededRandom(seed) {
+  let state = seed >>> 0;
+  return function next() {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Stable seed from whatever actually affects the simulation. */
+function seedFrom(records, currentWeek) {
+  let hash = (2166136261 ^ currentWeek) >>> 0;
+  for (const record of records || []) {
+    const key = `${record.rosterId ?? record.teamName ?? ''}:${record.wins}:${record.losses}:${Math.round(record.pointsFor || 0)}`;
+    for (let i = 0; i < key.length; i++) {
+      hash ^= key.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+  }
+  return hash >>> 0;
+}
+
 export class StandingsAnalyzer {
   constructor(api, rosterService) {
     this.api = api;
@@ -162,9 +194,10 @@ export class StandingsAnalyzer {
     rosters,
     futureMatchups,
     currentWeek,
-    iterations = 1000
+    iterations = 10000
   ) {
     let playoffAppearances = 0;
+    const random = seededRandom(seedFrom(allRecords, currentWeek));
 
     for (let sim = 0; sim < iterations; sim++) {
       // Create a copy of current records
@@ -200,8 +233,8 @@ export class StandingsAnalyzer {
             const ppg2 = this.calculateAdjustedPPG(record2, currentWeek + weekIdx);
 
             // Add variance (±20% standard deviation)
-            const points1 = ppg1 * (0.8 + Math.random() * 0.4);
-            const points2 = ppg2 * (0.8 + Math.random() * 0.4);
+            const points1 = ppg1 * (0.8 + random() * 0.4);
+            const points2 = ppg2 * (0.8 + random() * 0.4);
 
             // Update records
             if (points1 > points2) {

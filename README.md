@@ -74,8 +74,23 @@ Which platform is your league on?
 Select a platform (enter number):
 ```
 
-Pass `--platform` to skip that question (useful in scripts). Everything below
-is optional - anything you leave out is prompted for.
+Leagues you analyse are remembered, so later runs open straight on a picker:
+
+```
+Your saved leagues:
+
+1. Chill League (SLEEPER - gruidlp)
+2. Cupcake League (SLEEPER - gruidlp)
+3. Add another league
+4. Remove a saved league
+```
+
+They live in `config.json` beside the project, which is gitignored. ESPN private
+leagues need cookies to read at all, so those are stored there too - treat the
+file as a local credential store.
+
+Pass `--platform`, `--league` or `--username` to skip the picker entirely
+(useful in scripts). Everything else is prompted for.
 
 ### Sleeper League
 
