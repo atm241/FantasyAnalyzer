@@ -35,6 +35,16 @@ and last season's finished data before that. If either feed is unreachable the
 tool keeps running with a visible warning - weeks are estimated and every team is
 projected as average, rather than silently using stale numbers.
 
+Injury designations change through the week, so they are re-read on every run
+from the projections feed rather than the cached player index - a player cleared
+this morning shows as healthy immediately. Slower-moving data (names, positions,
+depth-chart order) comes from a player index cached for a day; use `--refresh`
+to refetch that too:
+
+```bash
+npm start -- --refresh
+```
+
 Run the freshness check at the start of a season, or in CI:
 
 ```bash

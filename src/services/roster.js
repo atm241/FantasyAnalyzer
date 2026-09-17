@@ -1,6 +1,7 @@
 import { isOnBye, getByeWeek, loadSchedule } from '../data/nflSchedule.js';
 import { loadTeamRankings } from '../data/teamRankings.js';
-import { getPlayerName, isEmptySlot } from '../utils/playerName.js';
+import { getPlayerName, isEmptySlot, realPlayers } from '../utils/playerName.js';
+import { buildPositionEconomics, FANTASY_POSITIONS } from './positionValue.js';
 
 /**
  * Roster management and display
@@ -11,6 +12,48 @@ export class RosterService {
     this.players = null;
     this.nflState = null;
     this.projections = null;
+    this.economicsCache = new Map();
+  }
+
+  /**
+   * League-specific position economics: how many of each position this league
+   * actually starts (flex slots included) and what the waiver wire offers for
+   * free. Shared by the waiver, trade and summary services.
+   */
+  async getEconomics(leagueId, roster = null) {
+    const key = `${leagueId}:${roster ? 'mine' : 'league'}`;
+    if (this.economicsCache.has(key)) return this.economicsCache.get(key);
+
+    const rosterPositions = await this.getRosterPositions(leagueId);
+    const rosters = await this.api.getLeagueRosters(leagueId);
+
+    const availableByPosition = {};
+    for (const position of FANTASY_POSITIONS) {
+      availableByPosition[position] = await this.getAvailablePlayers(leagueId, position);
+    }
+
+    const rosteredByPosition = {};
+    if (roster) {
+      // Callers pass either a raw roster (ids) or one already formatted.
+      const alreadyFormatted = typeof roster.starters?.[0] === 'object';
+      const formatted = alreadyFormatted
+        ? roster
+        : await this.formatRoster(roster, leagueId);
+
+      for (const player of realPlayers([...formatted.starters, ...formatted.bench])) {
+        (rosteredByPosition[player.position] ||= []).push(player);
+      }
+    }
+
+    const economics = buildPositionEconomics({
+      rosterPositions,
+      availableByPosition,
+      rosteredByPosition,
+      teams: rosters.length
+    });
+
+    this.economicsCache.set(key, economics);
+    return economics;
   }
 
   /**
@@ -53,6 +96,8 @@ export class RosterService {
    */
   async ensureSeasonData() {
     const season = await this.getCurrentSeason();
+    // Players first: the projection load overlays live injury data onto them.
+    await this.loadPlayers();
     await Promise.all([
       loadSchedule(season),
       loadTeamRankings(season),
@@ -71,7 +116,9 @@ export class RosterService {
 
     const { season, week } = await this.getNFLState();
     try {
-      this.projections = await this.api.getProjections(season, week) || {};
+      const { stats, players } = await this.api.getProjections(season, week);
+      this.projections = stats || {};
+      this.refreshLivePlayerData(players);
     } catch (error) {
       this.projections = {};
       console.warn(
@@ -82,6 +129,33 @@ export class RosterService {
     return this.projections;
   }
 
+  /**
+   * Overlay live injury and team data onto the cached player index.
+   *
+   * The bulk player feed is cached for a day to keep runs fast, but injury
+   * designations change through the week - a player cleared this morning must
+   * not still read as OUT. The projections feed is fetched every run and
+   * carries current designations, so it wins over the cached copy.
+   */
+  refreshLivePlayerData(livePlayers) {
+    if (!livePlayers || !this.players) return 0;
+
+    let updated = 0;
+    for (const [playerId, live] of Object.entries(livePlayers)) {
+      const cached = this.players[playerId];
+      if (!cached) continue;
+
+      for (const [field, value] of Object.entries(live)) {
+        // null is meaningful here: it is how a cleared injury is reported.
+        if (cached[field] !== value) {
+          cached[field] = value;
+          updated++;
+        }
+      }
+    }
+    return updated;
+  }
+
   /** True when a projection feed actually loaded (vs. being unavailable). */
   hasProjections() {
     return Boolean(this.projections) && Object.keys(this.projections).length > 0;
@@ -90,13 +164,13 @@ export class RosterService {
   /**
    * The projected points for a player under this league's scoring.
    *
-   * Returns { projection, projected } where `projected` is false when the feed
+   * Returns { realProjection, projected } where `projected` is false when the feed
    * has no entry for the player - Sleeper omits players it does not expect to
    * play, so they should not inherit an optimistic estimate.
    */
   buildProjection(playerId, scoringSettings) {
     const stats = this.projections?.[playerId];
-    if (!stats) return { projection: null, projected: false };
+    if (!stats) return { realProjection: null, projected: false };
 
     const reception = scoringSettings?.rec ?? 0;
     const points = reception >= 1
@@ -107,8 +181,8 @@ export class RosterService {
 
     const value = points ?? stats.pts_ppr ?? stats.pts_half_ppr ?? stats.pts_std;
     return value == null
-      ? { projection: null, projected: false }
-      : { projection: value, projected: true };
+      ? { realProjection: null, projected: false }
+      : { realProjection: value, projected: true };
   }
 
   /**
@@ -165,7 +239,7 @@ export class RosterService {
 
       const player = this.getPlayer(playerId);
       const team = player?.team || 'FA';
-      const { projection, projected } = this.buildProjection(playerId, scoringSettings);
+      const { realProjection, projected } = this.buildProjection(playerId, scoringSettings);
       return {
         playerId,
         name: getPlayerName(player),
@@ -175,7 +249,7 @@ export class RosterService {
         injuryStatus: player?.injury_status || null,
         onBye: isOnBye(team, currentWeek),
         byeWeek: getByeWeek(team),
-        realProjection: projection,
+        realProjection,
         projected,
         // Sleeper's own signals, used instead of hand-maintained name lists.
         searchRank: player?.search_rank ?? null,
@@ -203,6 +277,7 @@ export class RosterService {
     await this.ensureSeasonData();
     const currentWeek = await this.getCurrentWeek();
     const rosters = await this.api.getLeagueRosters(leagueId);
+    const scoringSettings = await this.getScoringSettings(leagueId);
 
     // Collect all rostered player IDs
     const rosteredIds = new Set();
@@ -229,7 +304,8 @@ export class RosterService {
           byeWeek: getByeWeek(team),
           searchRank: player.search_rank ?? null,
           depthChartOrder: player.depth_chart_order ?? null,
-          injuryBodyPart: player.injury_body_part || null
+          injuryBodyPart: player.injury_body_part || null,
+          ...this.buildProjection(playerId, scoringSettings)
         });
       }
     }

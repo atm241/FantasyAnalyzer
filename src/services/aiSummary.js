@@ -85,34 +85,44 @@ export class AISummaryService {
       });
     }
 
-    // Roster depth issues
+    // Roster depth issues. Only a position short of bodies for its starting
+    // slots is critical - a streamable position is never a crisis, because the
+    // best free agent each week is as good as anything you could stockpile.
     if (rosterNeeds.weakPositions.length > 0) {
-      const mostCritical = rosterNeeds.weakPositions.sort((a, b) => b.deficit - a.deficit)[0];
-      summary.criticalIssues.push({
-        type: 'roster_depth',
-        severity: 'medium',
-        message: `Weak depth at ${mostCritical.position}`,
-        details: `Only ${mostCritical.current} player(s), recommend ${mostCritical.recommended}`,
-        action: 'Target waiver pickups at this position'
-      });
+      const shortOfBodies = rosterNeeds.weakPositions
+        .filter(weak => !weak.streamable && weak.current < weak.recommended)
+        .sort((a, b) => b.priority - a.priority)[0];
 
-      // Add top waiver targets for weak positions
+      if (shortOfBodies) {
+        summary.criticalIssues.push({
+          type: 'roster_depth',
+          severity: 'medium',
+          message: `Thin at ${shortOfBodies.position}`,
+          details: `${shortOfBodies.current} rostered, this league starts about ${shortOfBodies.recommended} - ${shortOfBodies.reason}`,
+          action: 'Target waiver pickups at this position'
+        });
+      }
+
+      // Waiver priority follows the points an upgrade is actually worth.
       rosterNeeds.weakPositions.forEach(weak => {
         const targets = rosterNeeds.targetedPickups[weak.position] || [];
-        if (targets.length > 0) {
-          summary.waiverTargets.push({
-            position: weak.position,
-            priority: weak.deficit >= 2 ? 'HIGH' : 'MEDIUM',
-            topTargets: targets.slice(0, 3).map(p => ({
-              name: p.name,
-              team: p.team,
-              score: p.waiverScore,
-              onBye: p.onBye,
-              trending: p.trending
-            }))
-          });
-        }
+        if (targets.length === 0) return;
+
+        summary.waiverTargets.push({
+          position: weak.position,
+          priority: weak.priority >= 3 ? 'HIGH' : weak.priority >= 1 ? 'MEDIUM' : 'LOW',
+          gain: weak.priority,
+          topTargets: targets.slice(0, 3).map(p => ({
+            name: p.name,
+            team: p.team,
+            score: p.waiverScore,
+            onBye: p.onBye,
+            trending: p.trending
+          }))
+        });
       });
+
+      summary.waiverTargets.sort((a, b) => (b.gain || 0) - (a.gain || 0));
     }
 
     // Identify trending opportunities
@@ -213,7 +223,8 @@ export class AISummaryService {
     if (summary.waiverTargets.length > 0) {
       lines.push('🎯 PRIORITY WAIVER TARGETS:');
       summary.waiverTargets.forEach(target => {
-        lines.push(`\n${target.position} (${target.priority} PRIORITY):`);
+        const worth = target.gain ? ` +${target.gain.toFixed(1)} pts over the free alternative` : '';
+        lines.push(`\n${target.position} (${target.priority} PRIORITY):${worth}`);
         target.topTargets.forEach((player, idx) => {
           const badges = [];
           if (player.trending) badges.push('🔥 TRENDING');

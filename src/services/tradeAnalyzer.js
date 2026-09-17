@@ -15,7 +15,7 @@ export class TradeAnalyzer {
    * Calculate positional needs for a team
    * Returns surplus (excess) and deficit (need) positions
    */
-  calculateTeamNeeds(roster) {
+  calculateTeamNeeds(roster, economics = null) {
     if (!roster || !roster.starters || !roster.bench) {
       return { surplus: {}, deficit: {}, positionDepth: {} };
     }
@@ -28,24 +28,21 @@ export class TradeAnalyzer {
       positionDepth[player.position] = (positionDepth[player.position] || 0) + 1;
     });
 
-    // Define ideal roster composition
-    const idealDepth = {
-      'QB': 2,
-      'RB': 4,
-      'WR': 5,
-      'TE': 2,
-      'K': 1,
-      'DEF': 1
-    };
-
+    // Ideal depth comes from what this league actually starts (flex slots
+    // included) and whether the position can be refilled from waivers, rather
+    // than a fixed table that assumed one-flex non-PPR.
     const surplus = {};
     const deficit = {};
 
     for (const [position, count] of Object.entries(positionDepth)) {
-      const ideal = idealDepth[position] || 0;
+      const economy = economics?.[position];
+      const ideal = economy ? economy.idealCount : 0;
       const diff = count - ideal;
 
-      if (diff > 1 && !['K', 'DEF'].includes(position)) {
+      // Nothing to trade for or away at a position you refill each week.
+      if (economy?.streamable || ideal === 0) continue;
+
+      if (diff > 1) {
         surplus[position] = {
           count,
           ideal,
@@ -75,6 +72,16 @@ export class TradeAnalyzer {
     // Player quality, so a stud and a deep backup are not valued the same.
     value *= playerQuality(player);
 
+    // Points above what the same position offers for free. This is what makes a
+    // receiver in a three-flex PPR league worth more than a streamable defense.
+    const economy = this.economics?.[player.position];
+    if (economy) {
+      const edge = (player.realProjection ?? 0) - economy.replacement;
+      value += edge * 4;
+      if (economy.streamable) value *= 0.5;
+      if (economy.idealCount === 0) value *= 0.2;
+    }
+
     // Position scarcity multiplier
     value *= (POSITION_SCARCITY[player.position] || 1.0);
 
@@ -102,9 +109,10 @@ export class TradeAnalyzer {
     const allRosters = await this.rosterService.api.getLeagueRosters(leagueId);
     const allUsers = await this.rosterService.api.getLeagueUsers(leagueId);
     const allPlayers = await this.rosterService.loadPlayers();
+    this.economics = await this.rosterService.getEconomics(leagueId, yourRoster);
 
     // Analyze your team's needs
-    const yourNeeds = this.calculateTeamNeeds(yourRoster);
+    const yourNeeds = this.calculateTeamNeeds(yourRoster, this.economics);
 
     // Format your roster with player details
     const yourFormattedRoster = await this.rosterService.formatRoster(
@@ -120,7 +128,7 @@ export class TradeAnalyzer {
 
       // Format opponent roster
       const opponentFormatted = await this.rosterService.formatRoster(opponentRoster, leagueId);
-      const opponentNeeds = this.calculateTeamNeeds(opponentFormatted);
+      const opponentNeeds = this.calculateTeamNeeds(opponentFormatted, this.economics);
 
       // Find complementary needs (you have surplus where they have deficit, vice versa)
       const matches = this.findComplementaryNeeds(

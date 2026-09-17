@@ -154,7 +154,10 @@ export class PlatformAdapter {
    */
   async getAllPlayers() {
     if (this.platform === 'sleeper') {
-      return await this.memo('players', () => this.api.getAllPlayers());
+      return await this.memo(
+        'players',
+        () => this.api.getAllPlayers(Boolean(this.config.refreshPlayers))
+      );
     } else if (this.platform === 'espn') {
       // ESPN doesn't have a bulk player endpoint
       // We'll build a player cache from rosters
@@ -237,9 +240,12 @@ export class PlatformAdapter {
    */
   async getProjections(season, week) {
     if (this.platform === 'sleeper') {
-      return await this.api.getProjections(season, week);
+      return await this.memo(
+        `projections:${season}:${week}`,
+        () => this.api.getProjections(season, week)
+      );
     }
-    return {};
+    return { stats: {}, players: {} };
   }
 
   async getTrendingPlayers(type = 'add', hours = 24) {

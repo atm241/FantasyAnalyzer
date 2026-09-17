@@ -1,6 +1,7 @@
-import { POSITION_VALUE, isPlayerLikelyOut } from '../data/scoringConstants.js';
+import { isPlayerLikelyOut } from '../data/scoringConstants.js';
 import { isEliteOffense } from '../data/teamRankings.js';
 import { realPlayers } from '../utils/playerName.js';
+import { FANTASY_POSITIONS } from './positionValue.js';
 
 /**
  * Waiver wire analysis and recommendations
@@ -12,9 +13,14 @@ export class WaiverAnalyzer {
   }
 
   /**
-   * Score a player's waiver value (0-100)
+   * Score a player's waiver value (0-100).
+   *
+   * Driven by how much the player beats what is freely available at their
+   * position in this league, rather than a fixed per-position table. In a
+   * three-flex PPR league that lifts receivers and flattens streamable
+   * positions, which is what the league's own numbers say.
    */
-  scorePlayer(player, trending = false) {
+  scorePlayer(player, trending = false, economics = null) {
     if (!player || typeof player !== 'object') {
       return 0;
     }
@@ -26,8 +32,20 @@ export class WaiverAnalyzer {
       score -= 15;
     }
 
-    // Position value
-    score += POSITION_VALUE[player.position] || 0;
+    const position = economics?.[player.position];
+    if (position) {
+      // Points above the best free alternative at this position, scaled so a
+      // couple of points of edge is worth a meaningful amount of score.
+      const edge = (player.realProjection ?? 0) - position.replacement;
+      score += Math.max(-20, Math.min(30, edge * 3));
+
+      // How much this league needs the position at all.
+      score += Math.min(15, position.priority * 4);
+
+      // Nothing to gain from hoarding a position you can refill any week.
+      if (position.streamable) score -= 10;
+      if (position.idealCount === 0) score -= 25;
+    }
 
     // Active and healthy players get bonus
     if (player.status === 'Active' && !player.injuryStatus && !player.onBye) {
@@ -49,14 +67,15 @@ export class WaiverAnalyzer {
       score += 5;
     }
 
-    return Math.max(0, Math.min(100, score));
+    return Math.max(0, Math.min(100, Math.round(score)));
   }
 
   /**
    * Find best available players at each position
    */
   async getTopAvailable(leagueId, limit = 10) {
-    const positions = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'];
+    const positions = FANTASY_POSITIONS;
+    const economics = await this.rosterService.getEconomics(leagueId);
     const trending = await this.api.getTrendingPlayers('add', 24);
     const trendingIds = new Set(trending.map(t => t.player_id));
 
@@ -67,7 +86,7 @@ export class WaiverAnalyzer {
 
       const scored = available.map(player => ({
         ...player,
-        waiverScore: this.scorePlayer(player, trendingIds.has(player.playerId)),
+        waiverScore: this.scorePlayer(player, trendingIds.has(player.playerId), economics),
         trending: trendingIds.has(player.playerId)
       }));
 
@@ -93,27 +112,38 @@ export class WaiverAnalyzer {
       positionCounts[player.position] = (positionCounts[player.position] || 0) + 1;
     });
 
-    // Count required starters by position
-    const requiredStarters = {};
-    rosterPositions.forEach(pos => {
-      if (pos !== 'BN' && !pos.includes('FLEX')) {
-        requiredStarters[pos] = (requiredStarters[pos] || 0) + 1;
-      }
-    });
+    // What this league actually needs, flex slots included, measured against
+    // what the waiver wire offers for free.
+    const economics = await this.rosterService.getEconomics(leagueId, roster);
 
-    // Identify weak positions (fewer than 2x required starters)
+    // A position is weak when it is short of bodies for its dedicated slots, or
+    // when a free agent would genuinely upgrade the lineup. Streamable
+    // positions never qualify - the best one each week is always there.
     const weakPositions = [];
-    for (const [position, required] of Object.entries(requiredStarters)) {
+    for (const position of FANTASY_POSITIONS) {
+      const economy = economics[position];
+      if (!economy || economy.idealCount === 0) continue;
+
       const current = positionCounts[position] || 0;
-      if (current < required * 2) {
-        weakPositions.push({
-          position,
-          current,
-          recommended: required * 2,
-          deficit: (required * 2) - current
-        });
-      }
+      const shortOfSlots = current < economy.dedicatedSlots;
+      const worthUpgrading = !economy.streamable && economy.priority >= 1;
+
+      if (!shortOfSlots && !worthUpgrading) continue;
+
+      weakPositions.push({
+        position,
+        current,
+        recommended: economy.idealCount,
+        deficit: Math.max(economy.idealCount - current, shortOfSlots ? 1 : 0),
+        priority: economy.priority,
+        streamable: economy.streamable,
+        reason: shortOfSlots
+          ? `only ${current} for ${economy.dedicatedSlots} starting slot(s)`
+          : `waivers offer +${economy.priority.toFixed(1)} pts over your marginal starter`
+      });
     }
+
+    weakPositions.sort((a, b) => b.priority - a.priority);
 
     // Get trending data once (performance optimization - avoid repeated API calls)
     const trending = await this.api.getTrendingPlayers('add', 24).catch(() => []);
@@ -126,7 +156,7 @@ export class WaiverAnalyzer {
 
       const scored = available.map(player => ({
         ...player,
-        waiverScore: this.scorePlayer(player, trendingIds.has(player.playerId)),
+        waiverScore: this.scorePlayer(player, trendingIds.has(player.playerId), economics),
         trending: trendingIds.has(player.playerId)
       }));
 
@@ -137,7 +167,8 @@ export class WaiverAnalyzer {
     return {
       weakPositions,
       targetedPickups,
-      positionCounts
+      positionCounts,
+      economics
     };
   }
 

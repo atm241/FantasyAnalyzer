@@ -3,6 +3,14 @@ import { getCurrentSeasonYear } from '../data/nflSchedule.js';
 import { readCache, writeCache } from '../utils/diskCache.js';
 
 const SLEEPER_BASE_URL = 'https://api.sleeper.app/v1';
+const SLEEPER_PROJECTIONS_URL = 'https://api.sleeper.app/projections/nfl';
+const FANTASY_POSITIONS = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'];
+
+/** Injury and team fields that change faster than the cached player index. */
+const LIVE_PLAYER_FIELDS = [
+  'injury_status', 'injury_body_part', 'injury_notes',
+  'team', 'position', 'fantasy_positions'
+];
 
 const PLAYERS_CACHE_KEY = 'sleeper-players';
 const PLAYERS_CACHE_HOURS = 24;
@@ -84,8 +92,8 @@ export class SleeperAPI {
    * day, so it is trimmed to the fields this tool uses (~4% of the payload) and
    * cached on disk.
    */
-  async getAllPlayers() {
-    const cached = readCache(PLAYERS_CACHE_KEY, PLAYERS_CACHE_HOURS);
+  async getAllPlayers(forceRefresh = false) {
+    const cached = forceRefresh ? null : readCache(PLAYERS_CACHE_KEY, PLAYERS_CACHE_HOURS);
     if (cached) return cached;
 
     const response = await axios.get(`${this.baseURL}/players/nfl`);
@@ -114,16 +122,44 @@ export class SleeperAPI {
    * Get matchups for a specific week
    */
   /**
-   * Get weekly projections, keyed by player id.
+   * Get this week's projections.
    *
-   * Returns each player's projected stat line, including pts_std / pts_half_ppr
-   * / pts_ppr. Players Sleeper does not expect to play are simply absent.
+   * Uses the projections feed that embeds each player's current record rather
+   * than the stats-only variant, because it carries live injury designations.
+   * The bulk player index is cached for a day, so without this an injury that
+   * cleared the same day would still read as OUT.
+   *
+   * Returns { stats, players }: projected stat lines keyed by player id, and
+   * the fresh injury/team fields to overlay onto the cached index.
    */
   async getProjections(season, week) {
-    const response = await axios.get(
-      `${this.baseURL}/projections/nfl/regular/${season}/${week}`
-    );
-    return response.data || {};
+    const response = await axios.get(`${SLEEPER_PROJECTIONS_URL}/${season}/${week}`, {
+      params: {
+        season_type: 'regular',
+        'position[]': FANTASY_POSITIONS,
+        order_by: 'ppr'
+      }
+    });
+
+    const stats = {};
+    const players = {};
+
+    for (const entry of response.data || []) {
+      const playerId = entry.player_id ?? entry.player?.player_id;
+      if (!playerId) continue;
+
+      if (entry.stats) stats[playerId] = entry.stats;
+
+      if (entry.player) {
+        const live = {};
+        for (const field of LIVE_PLAYER_FIELDS) {
+          if (entry.player[field] !== undefined) live[field] = entry.player[field];
+        }
+        players[playerId] = live;
+      }
+    }
+
+    return { stats, players };
   }
 
   async getMatchups(leagueId, week) {

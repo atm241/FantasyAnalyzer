@@ -289,7 +289,8 @@ async function runAnalyzer(username, leagueId) {
     // Analyze trade opportunities
     display.displayInfo('Finding trade partners based on team needs...');
     const tradeMatches = await tradeAnalyzer.findTradeMatches(formatted, league.league_id, user.user_id);
-    const yourNeeds = tradeAnalyzer.calculateTeamNeeds(formatted);
+    const economics = await rosterService.getEconomics(league.league_id, formatted);
+    const yourNeeds = tradeAnalyzer.calculateTeamNeeds(formatted, economics);
     console.log('\n' + '='.repeat(70));
     console.log(tradeAnalyzer.formatTradeAnalysis(tradeMatches, yourNeeds));
     console.log('='.repeat(70) + '\n');
@@ -325,6 +326,7 @@ program
   .option('--espn-s2 <espnS2>', 'ESPN S2 cookie (for private leagues)')
   .option('--swid <swid>', 'ESPN SWID cookie (for private leagues)')
   .option('-s, --season <season>', 'Season year (defaults to the current NFL season)', String(getCurrentSeasonYear()))
+  .option('--refresh', 'Ignore the cached player index and refetch it')
   .action(async (options) => {
     console.log('Welcome to Fantasy Analyzer!\n');
 
@@ -352,7 +354,8 @@ program
     // Initialize platform adapter
     const config = {
       season: parseInt(options.season),
-      leagueId: options.league
+      leagueId: options.league,
+      refreshPlayers: Boolean(options.refresh)
     };
 
     if (platform === 'espn') {

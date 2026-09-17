@@ -131,10 +131,23 @@ export class DisplayFormatter {
     }
 
     if (analysis.weakPositions.length > 0) {
-      console.log('\n' + chalk.bold.red('Weak Positions:'));
+      console.log('\n' + chalk.bold.red('Where an upgrade actually helps:'));
       analysis.weakPositions.forEach(weak => {
-        console.log(`${weak.position}: ${weak.current}/${weak.recommended} (need ${weak.deficit} more)`);
+        console.log(
+          `${chalk.bold(weak.position)}  ${chalk.gray(`have ${weak.current}, start ~${weak.recommended}`)}` +
+          `  ${chalk.yellow(weak.reason || '')}`
+        );
       });
+
+      const streamable = Object.values(analysis.economics || {})
+        .filter(e => e.position && e.streamable && e.idealCount > 0)
+        .map(e => `${e.position} (best free agent ${e.replacement.toFixed(1)} pts)`);
+
+      if (streamable.length > 0) {
+        console.log(
+          '\n' + chalk.gray(`Streamable, not worth stockpiling: ${streamable.join(', ')}`)
+        );
+      }
 
       console.log('\n' + chalk.bold.green('Targeted Pickups:'));
       for (const [position, players] of Object.entries(analysis.targetedPickups)) {
