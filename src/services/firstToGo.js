@@ -3,6 +3,19 @@ import { isWeakOffense } from '../data/teamRankings.js';
 import { realPlayers } from '../utils/playerName.js';
 
 /**
+ * Small credit for long-term outlook, so a near-tie on projected points is
+ * broken by which player still has a role to grow into. Sleeper's search_rank
+ * orders every player by fantasy relevance, 1 being the most relevant.
+ */
+function upsideCredit(searchRank) {
+  if (searchRank == null || searchRank >= 9999999) return 0;
+  if (searchRank <= 50) return 20;
+  if (searchRank <= 150) return 10;
+  if (searchRank <= 300) return 5;
+  return 0;
+}
+
+/**
  * Identify players to drop or trade
  */
 export class FirstToGoAnalyzer {
@@ -51,7 +64,7 @@ export class FirstToGoAnalyzer {
   /**
    * Analyze roster for droppable and tradeable players
    */
-  async analyzeFirstToGo(roster, currentWeek) {
+  async analyzeFirstToGo(roster, currentWeek, leagueId = null) {
     // Calculate position depth
     const positionDepth = {};
     const allPlayers = realPlayers([...roster.starters, ...roster.bench]);
@@ -74,11 +87,35 @@ export class FirstToGoAnalyzer {
       isStarter: true
     }));
 
-    // Identify droppable players (bench only)
-    const droppable = benchScored
-      .filter(p => p.value < 40) // Low value threshold
-      .sort((a, b) => a.value - b.value)
-      .slice(0, 5);
+    // Rest-of-season value is the honest measure of who is expendable: a
+    // threshold on a heuristic score could rate a full roster as having nobody
+    // to drop, which is useless when you need a spot for a waiver claim.
+    const outlook = leagueId
+      ? await this.rosterService.getRestOfSeasonOutlook(leagueId).catch(() => null)
+      : null;
+
+    const restOfSeasonFor = player => {
+      const entry = outlook?.players?.[player.playerId];
+      return entry ? entry.restOfSeason + entry.playoff : null;
+    };
+
+    const ranked = benchScored
+      .map(player => {
+        const restOfSeason = restOfSeasonFor(player);
+        return {
+          ...player,
+          restOfSeason,
+          // Projected points decide it, nudged by how much future a player has
+          // left. Two bench backs within a few points are not equivalent if one
+          // is a well-regarded handcuff and the other is roster filler.
+          holdValue: (restOfSeason ?? player.value) + upsideCredit(player.searchRank)
+        };
+      })
+      .sort((a, b) => a.holdValue - b.holdValue);
+
+    // Always ranked, never empty while there is anyone on the bench.
+    const droppable = ranked.slice(0, 5);
+    const bestDrop = ranked[0] || null;
 
     // Identify trade candidates (redundant depth)
     const tradeCandidates = [];
@@ -112,10 +149,15 @@ export class FirstToGoAnalyzer {
     const byeBench = benchScored.filter(p => p.onBye);
 
     return {
+      bestDrop: bestDrop && {
+        ...bestDrop,
+        reason: this.getDropReason(bestDrop, positionDepth, ranked)
+      },
       droppable: droppable.map(p => ({
         ...p,
-        reason: this.getDropReason(p, positionDepth)
+        reason: this.getDropReason(p, positionDepth, ranked)
       })),
+      rosterFull: allPlayers.length >= (roster.starters.length + roster.bench.length),
       tradeCandidates: tradeCandidates.slice(0, 3),
       injuredBench,
       byeBench,
@@ -126,8 +168,18 @@ export class FirstToGoAnalyzer {
   /**
    * Get human-readable drop reason
    */
-  getDropReason(player, positionDepth) {
+  getDropReason(player, positionDepth, ranked = []) {
     const reasons = [];
+
+    // Lead with the number that decided the ranking, and say so plainly when
+    // long-term outlook rather than raw points put a player first.
+    if (player.restOfSeason != null) {
+      reasons.push(`${Math.round(player.restOfSeason)} pts rest-of-season`);
+
+      if (player.searchRank != null && player.searchRank > 300) {
+        reasons.push(`no long-term outlook (rank ${player.searchRank})`);
+      }
+    }
 
     if (player.injuryStatus === 'IR') {
       reasons.push('On IR');
@@ -150,7 +202,7 @@ export class FirstToGoAnalyzer {
     }
 
     if (reasons.length === 0) {
-      reasons.push('Low projected value');
+      reasons.push('Lowest projected value on your bench');
     }
 
     return reasons.join(', ');
@@ -164,14 +216,25 @@ export class FirstToGoAnalyzer {
 
     lines.push('\n🗑️  FIRST TO GO - DROP CANDIDATES\n');
 
+    if (analysis.bestDrop) {
+      const drop = analysis.bestDrop;
+      lines.push(`BEST DROP: ${drop.name} (${drop.position}) ${drop.team || ''}`);
+      lines.push(`  ${drop.reason}`);
+      lines.push('  Least valuable player you can cut, counting both projected points and upside.\n');
+    }
+
     if (analysis.droppable.length === 0) {
-      lines.push('✓ No obvious drop candidates - roster looks solid!\n');
+      lines.push('Your bench is empty - nothing to drop.\n');
     } else {
-      lines.push('Players to consider dropping for waiver pickups:\n');
+      lines.push('Ranked by what you give up, least valuable first:\n');
       analysis.droppable.forEach((player, idx) => {
         const status = player.onBye ? '(BYE)' : player.injuryStatus ? `(${player.injuryStatus})` : '';
         lines.push(`${idx + 1}. ${player.name.padEnd(25)} ${player.position.padEnd(4)} ${player.team.padEnd(4)} ${status}`);
-        lines.push(`   Roster Value: ${player.value}/100`);
+        lines.push(
+          player.restOfSeason != null
+            ? `   Rest-of-season: ${Math.round(player.restOfSeason)} pts`
+            : `   Roster Value: ${player.value}/100`
+        );
         lines.push(`   Reason: ${player.reason}\n`);
       });
     }

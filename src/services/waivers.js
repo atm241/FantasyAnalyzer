@@ -42,40 +42,69 @@ export class WaiverAnalyzer {
   }
 
   /**
+   * Rest-of-season context for pricing bids: what each player is projected to
+   * score from here, and what the weakest player you would actually start is
+   * worth over the same stretch.
+   */
+  async buildBidContext(leagueId, roster) {
+    const outlook = await this.rosterService.getRestOfSeasonOutlook(leagueId);
+    const rosFor = player => {
+      const entry = outlook.players[player.playerId];
+      return entry ? entry.restOfSeason + entry.playoff : 0;
+    };
+
+    const formatted = await this.rosterService.formatRoster(roster, leagueId);
+    const rosterPositions = await this.rosterService.getRosterPositions(leagueId);
+    const startingSlots = rosterPositions.filter(slot => slot !== 'BN').length;
+
+    // Your starters ranked by rest-of-season value; the last one is the bar a
+    // waiver add has to clear.
+    const ranked = realPlayers([...formatted.starters, ...formatted.bench])
+      .map(rosFor)
+      .sort((a, b) => b - a);
+
+    return {
+      rosFor,
+      rosMarginal: ranked[Math.max(startingSlots - 1, 0)] ?? 0
+    };
+  }
+
+  /**
    * Suggested FAAB bid for a target.
    *
    * Priced off the points the player adds over the best free alternative at
    * their position, across the weeks left to play - so a genuine starter costs
    * real budget and a one-week streamer costs a dollar.
    */
-  suggestBid(player, economics, budget, weeksRemaining = 12) {
+  suggestBid(player, economics, budget, context = {}) {
     if (!budget || budget.remaining <= 0) return null;
 
     const economy = economics?.[player.position];
-    if (!economy || economy.idealCount === 0) return { amount: 0, note: 'not startable in this league' };
+    if (!economy || economy.idealCount === 0) {
+      return { amount: 0, note: 'not startable in this league' };
+    }
 
-    // Priced against the player they would actually displace in your lineup,
-    // not against the best free agent - the top target is that free agent, so
-    // that comparison is always zero.
-    const weeklyEdge = (player.realProjection ?? 0) - economy.incumbent;
+    // Priced on the rest of the season, not one week. A bid buys a roster spot
+    // for the remainder, so a player who starts for you every week is worth far
+    // more than one who happens to project well on Sunday.
+    const rosGain = (context.rosFor?.(player) ?? 0) - (context.rosMarginal ?? 0);
 
-    // Nothing gained over a free agent you could add for nothing.
-    if (weeklyEdge <= 0.5 || economy.streamable) {
+    if (economy.streamable || rosGain <= 2) {
       return {
         amount: Math.min(1, budget.remaining),
         note: economy.streamable ? 'minimum bid - streamable position' : 'minimum bid - no real upgrade'
       };
     }
 
-    const seasonEdge = weeklyEdge * Math.max(weeksRemaining, 1);
-
-    // Share of the remaining budget, capped so one add cannot spend the season.
-    const share = Math.min(seasonEdge / 120, 0.35);
+    // A player worth this many points over your marginal starter for the rest
+    // of the season justifies the maximum share of what is left.
+    const REFERENCE_GAIN = 150;
+    const share = Math.min(rosGain / REFERENCE_GAIN, 0.35);
     const amount = Math.max(1, Math.round(budget.remaining * share));
 
     return {
       amount: Math.min(amount, budget.remaining),
-      note: `+${weeklyEdge.toFixed(1)} pts/wk over your marginal starter`
+      note: `+${Math.round(rosGain)} pts rest-of-season over your marginal starter`
     };
   }
 
@@ -229,8 +258,7 @@ export class WaiverAnalyzer {
     weakPositions.sort((a, b) => b.priority - a.priority);
 
     const budget = userId ? await this.getWaiverBudget(leagueId, userId) : null;
-    const { week } = await this.rosterService.getNFLState();
-    const weeksRemaining = Math.max(18 - week, 1);
+    const bidContext = await this.buildBidContext(leagueId, roster);
 
     // Get trending data once (performance optimization - avoid repeated API calls)
     const trending = await this.api.getTrendingPlayers('add', 24).catch(() => []);
@@ -250,7 +278,7 @@ export class WaiverAnalyzer {
       scored.sort(WaiverAnalyzer.byWaiverValue);
       targetedPickups[weakness.position] = scored.slice(0, 5).map(player => ({
         ...player,
-        bid: this.suggestBid(player, economics, budget, weeksRemaining)
+        bid: this.suggestBid(player, economics, budget, bidContext)
       }));
     }
 

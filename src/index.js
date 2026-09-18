@@ -367,7 +367,7 @@ async function runAnalyzer(username, leagueId) {
 
     // Analyze First to Go (droppable/tradeable players)
     display.displayInfo('Analyzing droppable and tradeable players...');
-    const firstToGoAnalysis = await firstToGo.analyzeFirstToGo(formatted, currentWeek);
+    const firstToGoAnalysis = await firstToGo.analyzeFirstToGo(formatted, currentWeek, league.league_id);
     console.log('\n' + '='.repeat(70));
     console.log(firstToGo.formatFirstToGo(firstToGoAnalysis));
     console.log('='.repeat(70) + '\n');
