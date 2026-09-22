@@ -19,6 +19,20 @@ A comprehensive fantasy football analysis tool supporting **Sleeper** and **ESPN
 npm install
 ```
 
+## Looking up one player
+
+To answer "should I add this guy, and what should I bid?" without reading the
+whole report:
+
+```bash
+npm start -- --player "Carnell Tate"
+```
+
+It reports the player's projection, rest-of-season and playoff value, whether
+they are a free agent or need a trade, where they would rank among the players
+you can actually start, a suggested FAAB bid, and who to drop to make room.
+Partial names work; ambiguous ones prompt.
+
 ## Keeping season data current
 
 Everything season-specific is derived at runtime, so the tool rolls into a new

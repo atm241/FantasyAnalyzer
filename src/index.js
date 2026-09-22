@@ -10,6 +10,7 @@ import { FirstToGoAnalyzer } from './services/firstToGo.js';
 import { StandingsAnalyzer } from './services/standings.js';
 import { TradeAnalyzer } from './services/tradeAnalyzer.js';
 import { MatchupService } from './services/matchup.js';
+import { PlayerLookupService } from './services/playerLookup.js';
 import { DisplayFormatter } from './display/formatter.js';
 import readline from 'readline';
 import { getCurrentSeasonYear } from './data/nflSchedule.js';
@@ -19,7 +20,7 @@ import {
   getSavedLeagues, rememberLeague, forgetLeague, describeLeague, CONFIG_PATH
 } from './utils/savedLeagues.js';
 
-let api, rosterService, optimizer, waiverAnalyzer, aiSummary, firstToGo, standings, tradeAnalyzer, matchupService;
+let api, rosterService, optimizer, waiverAnalyzer, aiSummary, firstToGo, standings, tradeAnalyzer, matchupService, playerLookup;
 const display = new DisplayFormatter();
 
 let promptInterface = null;
@@ -159,6 +160,50 @@ async function selectPlatform() {
 }
 
 /**
+ * Report on one player: what they are worth to this roster, what to bid, and
+ * who to cut. Handles an ambiguous name by asking which one was meant.
+ */
+async function runPlayerLookup(league, user, query) {
+  const candidates = await playerLookup.findCandidates(query);
+
+  if (candidates.length === 0) {
+    display.displayError(`No player found matching '${query}'.`);
+    return;
+  }
+
+  let chosen = candidates[0];
+
+  // Several plausible matches, and no exact one: let the user pick.
+  if (candidates.length > 1 && !candidates[0].exact) {
+    console.log(`\nSeveral players match '${query}':\n`);
+    candidates.forEach((c, idx) => {
+      const player = c.player;
+      console.log(
+        `${idx + 1}. ${getPlayerName(player).padEnd(24)} ` +
+        `${(player.position || '--').padEnd(4)} ${(player.team || 'FA').padEnd(4)}` +
+        (player.search_rank != null ? `  rank ${player.search_rank}` : '')
+      );
+    });
+
+    const answer = (await prompt('\nWhich one? (enter number, blank for 1): ')).trim();
+    const pick = answer === '' ? 1 : Number(answer);
+    if (!Number.isInteger(pick) || pick < 1 || pick > candidates.length) {
+      display.displayError('Not one of the options.');
+      return;
+    }
+    chosen = candidates[pick - 1];
+  }
+
+  const report = await playerLookup.analyze(league.league_id, user.user_id, chosen.playerId);
+  if (!report) {
+    display.displayError('Could not analyse that player.');
+    return;
+  }
+
+  display.displayPlayerReport(report);
+}
+
+/**
  * Interactive league selection
  */
 async function selectLeague(username) {
@@ -210,7 +255,7 @@ async function selectLeague(username) {
 /**
  * Main application flow
  */
-async function runAnalyzer(username, leagueId) {
+async function runAnalyzer(username, leagueId, playerQuery = null) {
   try {
     let user, league;
 
@@ -245,6 +290,12 @@ async function runAnalyzer(username, leagueId) {
 
     if (isNew) {
       console.log(`Saved "${league.name}" for next time (${CONFIG_PATH}).`);
+    }
+
+    // A single-player lookup answers one question, so it skips the full report.
+    if (playerQuery) {
+      await runPlayerLookup(league, user, playerQuery);
+      return;
     }
 
     // Get and display current week
@@ -427,6 +478,7 @@ program
   .option('--swid <swid>', 'ESPN SWID cookie (for private leagues)')
   .option('-s, --season <season>', 'Season year (defaults to the current NFL season)', String(getCurrentSeasonYear()))
   .option('--refresh', 'Ignore the cached player index and refetch it')
+  .option('--player <name>', 'Look up one player: value, FAAB bid, who to drop')
   .action(async (options) => {
     console.log('Welcome to Fantasy Analyzer!\n');
 
@@ -535,9 +587,10 @@ program
     standings = new StandingsAnalyzer(api, rosterService);
     tradeAnalyzer = new TradeAnalyzer(rosterService);
     matchupService = new MatchupService(api, rosterService, optimizer);
+    playerLookup = new PlayerLookupService(api, rosterService, waiverAnalyzer, firstToGo);
 
     try {
-      await runAnalyzer(options.username, options.league);
+      await runAnalyzer(options.username, options.league, options.player);
     } finally {
       closePrompt();
     }

@@ -1,5 +1,11 @@
 import chalk from 'chalk';
 
+/** 1 -> 1st, 2 -> 2nd, and so on. */
+function ordinal(n) {
+  const suffix = ['th', 'st', 'nd', 'rd'][(n % 100 > 10 && n % 100 < 14) ? 0 : Math.min(n % 10, 4) % 4] || 'th';
+  return `${n}${suffix}`;
+}
+
 /**
  * CLI display formatting utilities
  */
@@ -31,6 +37,97 @@ export class DisplayFormatter {
     });
 
     console.log(chalk.bold.cyan('='.repeat(70)) + '\n');
+  }
+
+  /**
+   * Display a single-player report: what they are worth to you, what to bid,
+   * and who to cut for them.
+   */
+  displayPlayerReport(report) {
+    const t = report.target;
+    console.log('\n' + chalk.bold.cyan('='.repeat(70)));
+    console.log(chalk.bold.cyan(`${t.name.toUpperCase()}  ${t.position} ${t.team}`));
+    console.log(chalk.bold.cyan('='.repeat(70)));
+
+    const tags = [];
+    if (t.searchRank != null) tags.push(`rank ${t.searchRank}`);
+    if (t.depthChartOrder != null) tags.push(`${ordinal(t.depthChartOrder)} on depth chart`);
+    if (t.injuryStatus) {
+      tags.push(chalk.red(t.injuryStatus + (t.injuryBodyPart ? ` (${t.injuryBodyPart})` : '')));
+    }
+    if (tags.length) console.log('\n' + chalk.gray(tags.join('  |  ')));
+
+    console.log(
+      `\nWeek ${report.week}: ${t.projected ? chalk.bold((t.realProjection ?? 0).toFixed(1)) + ' pts' : chalk.gray('no projection - not expected to play')}`
+    );
+    console.log(
+      `Rest of season: ${chalk.bold(Math.round(t.restOfSeason))} pts` +
+      `   Playoffs (wk ${report.playoffStart}+): ${chalk.bold(Math.round(t.playoffPoints))} pts`
+    );
+
+    // Ownership
+    if (report.onYourRoster) {
+      console.log('\n' + chalk.green('Already on your roster.'));
+    } else if (report.owner) {
+      console.log('\n' + chalk.yellow(`Rostered by ${report.owner}`) + chalk.gray(' - would need a trade, not a claim.'));
+    } else {
+      console.log('\n' + chalk.bold.green('FREE AGENT - available to claim'));
+    }
+
+    const impact = report.lineupImpact;
+    if (impact) {
+      console.log('\n' + chalk.bold('Impact on your roster:'));
+      const group = impact.positions?.length > 1 ? impact.positions.join('/') : t.position;
+      console.log(
+        `  Would rank ${chalk.bold('#' + impact.rank)} of ${impact.of} among your ${group}` +
+        `  (you start ${impact.startingSlots})`
+      );
+      console.log(
+        impact.wouldStart
+          ? `  ${chalk.green('Immediate starter')}` +
+            (impact.displaced ? chalk.gray(` - displaces ${impact.displaced.name}`) : '')
+          : `  ${chalk.yellow('Bench depth')} - would not crack your lineup today`
+      );
+      if (impact.displaced) {
+        const gain = Math.round(impact.gain);
+        console.log(
+          impact.wouldStart
+            ? `  Net change: ${chalk.green('+' + gain)} pts rest-of-season`
+            : chalk.gray(`  ${Math.abs(gain)} pts behind ${impact.displaced.name}, your weakest starter`)
+        );
+      }
+    }
+
+    // Bid
+    if (report.bid?.budget) {
+      const { budget, suggestion } = report.bid;
+      console.log('\n' + chalk.bold('FAAB:'));
+      console.log(chalk.gray(`  $${budget.remaining} of $${budget.total} left`));
+      if (suggestion) {
+        console.log(`  Suggested bid: ${chalk.bold.green('$' + suggestion.amount)}  ${chalk.gray(suggestion.note)}`);
+      }
+    } else if (report.available) {
+      console.log('\n' + chalk.gray('This league does not use FAAB bidding.'));
+    }
+
+    // Drop
+    if (report.drop) {
+      console.log('\n' + chalk.bold('Roster space:'));
+      console.log(chalk.gray(`  Holding ${report.drop.held} of ${report.drop.capacity}`));
+      if (report.drop.rosterFull && report.drop.bestDrop) {
+        console.log(
+          `  ${chalk.red('Full')} - drop ${chalk.bold(report.drop.bestDrop.name)}` +
+          ` (${report.drop.bestDrop.position})` +
+          (report.drop.bestDrop.restOfSeason != null
+            ? chalk.gray(`, ${Math.round(report.drop.bestDrop.restOfSeason)} pts rest-of-season`)
+            : '')
+        );
+      } else if (!report.drop.rosterFull) {
+        console.log(`  ${chalk.green('Open spot available')} - no drop needed`);
+      }
+    }
+
+    console.log('\n' + chalk.bold.cyan('='.repeat(70)) + '\n');
   }
 
   /**

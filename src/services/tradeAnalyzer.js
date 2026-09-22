@@ -116,6 +116,8 @@ export class TradeAnalyzer {
     const allPlayers = await this.rosterService.loadPlayers();
     this.economics = await this.rosterService.getEconomics(leagueId, yourRoster);
     this.outlook = await this.rosterService.getRestOfSeasonOutlook(leagueId);
+    this.rosterPositions = await this.rosterService.getRosterPositions(leagueId);
+    this.myPlayers = realPlayers([...yourRoster.starters, ...yourRoster.bench]);
 
     // Analyze your team's needs
     const yourNeeds = this.calculateTeamNeeds(yourRoster, this.economics);
@@ -366,6 +368,62 @@ export class TradeAnalyzer {
     return proposals.slice(0, 3); // Top 3 proposals
   }
 
+  /** Which positions each starting slot accepts. */
+  static slotAccepts(slot, position) {
+    if (slot === 'FLEX') return ['RB', 'WR', 'TE'].includes(position);
+    if (slot === 'SUPER_FLEX') return ['QB', 'RB', 'WR', 'TE'].includes(position);
+    if (slot === 'WRRB_FLEX') return ['RB', 'WR'].includes(position);
+    if (slot === 'REC_FLEX') return ['WR', 'TE'].includes(position);
+    return slot === position;
+  }
+
+  /**
+   * Best starting lineup value a set of players can produce for the rest of the
+   * season, filling each slot greedily with the most valuable eligible player.
+   */
+  bestLineupValue(players) {
+    const slots = (this.rosterPositions || []).filter(slot => slot !== 'BN');
+    if (slots.length === 0) return 0;
+
+    const pool = [...players]
+      .map(player => ({ player, value: this.estimateRestOfSeasonPoints(player) }))
+      .sort((a, b) => b.value - a.value);
+
+    const used = new Set();
+    let total = 0;
+
+    for (const slot of slots) {
+      const pick = pool.find(
+        entry => !used.has(entry.player.playerId) &&
+          TradeAnalyzer.slotAccepts(slot, entry.player.position)
+      );
+      if (!pick) continue;
+      used.add(pick.player.playerId);
+      total += pick.value;
+    }
+
+    return total;
+  }
+
+  /**
+   * What a trade does to the lineup you can actually field.
+   *
+   * Summing each side's points treats two mid players as equal to one stud, but
+   * only one of them can occupy the slot the stud vacated - the other displaces
+   * a bench player worth far less. This measures the difference that matters.
+   */
+  lineupImpactOf(giving, theirPlayers) {
+    if (!this.myPlayers || !this.rosterPositions) return null;
+
+    const givingIds = new Set(giving.map(p => p.playerId));
+    const after = this.myPlayers
+      .filter(player => !givingIds.has(player.playerId))
+      .concat(theirPlayers);
+
+    const before = this.bestLineupValue(this.myPlayers);
+    return Math.round(this.bestLineupValue(after) - before);
+  }
+
   /**
    * Create a structured trade proposal with evaluation
    */
@@ -378,6 +436,10 @@ export class TradeAnalyzer {
 
     const pointsDiff = theirPoints - yourPoints;
     const valueDiff = theirValue - yourValue;
+    const lineupGain = this.lineupImpactOf(yourPlayers, theirPlayers);
+
+    // The verdict follows what your startable lineup gains, not the raw sum.
+    const verdictBasis = lineupGain ?? pointsDiff;
 
     return {
       youGive: yourPlayers,
@@ -389,7 +451,8 @@ export class TradeAnalyzer {
       yourProjectedPoints: yourPoints,
       theirProjectedPoints: theirPoints,
       projectedPointsGain: pointsDiff,
-      winner: pointsDiff > 5 ? 'you' : pointsDiff < -5 ? 'them' : 'fair'
+      lineupGain,
+      winner: verdictBasis > 5 ? 'you' : verdictBasis < -5 ? 'them' : 'fair'
     };
   }
 
@@ -457,13 +520,23 @@ export class TradeAnalyzer {
 
           // Trade evaluation
           lines.push('\n  📊 Trade Evaluation:');
-          lines.push(`     Total Value: You ${proposal.yourTotalValue} vs Them ${proposal.theirTotalValue}`);
-          lines.push(`     ROS Points: You ${proposal.yourProjectedPoints} vs Them ${proposal.theirProjectedPoints}`);
+          lines.push(`     Raw points: You ${proposal.yourProjectedPoints} vs Them ${proposal.theirProjectedPoints}`);
 
+          if (proposal.lineupGain != null) {
+            const gain = proposal.lineupGain;
+            lines.push(
+              `     Your starting lineup: ${gain >= 0 ? '+' : ''}${gain} pts rest-of-season` +
+              (gain < 0 && proposal.projectedPointsGain > 0
+                ? '  (raw points favour you, but only one of them can start)'
+                : '')
+            );
+          }
+
+          const margin = Math.abs(proposal.lineupGain ?? proposal.projectedPointsGain);
           const winnerText = proposal.winner === 'you'
-            ? `✅ YOU WIN by ${proposal.projectedPointsGain} points`
+            ? `✅ YOU WIN by ${margin} points`
             : proposal.winner === 'them'
-            ? `⚠️  THEY WIN by ${Math.abs(proposal.projectedPointsGain)} points`
+            ? `⚠️  THEY WIN by ${margin} points`
             : '🤝 FAIR TRADE (even value)';
 
           lines.push(`     Winner: ${winnerText}\n`);
