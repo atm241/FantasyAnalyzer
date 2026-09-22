@@ -40,6 +40,30 @@ export class DisplayFormatter {
   }
 
   /**
+   * Display the team's competitive window and what it implies.
+   */
+  displayContention(contention) {
+    if (!contention) return;
+
+    const tint = contention.stage === 'contending'
+      ? chalk.green
+      : contention.stage === 'rebuilding'
+        ? chalk.red
+        : chalk.yellow;
+
+    console.log('\n' + tint.bold(contention.headline));
+    console.log(chalk.gray(`  ${contention.reasons.join('  |  ')}`));
+    console.log(`  ${contention.tradeAdvice}`);
+    console.log(chalk.gray(`  Waivers: ${contention.stashPolicy}`));
+
+    if (!contention.tradesAllowed) {
+      console.log(chalk.red('  Trade deadline has passed.'));
+    } else if (contention.weeksToDeadline != null && contention.weeksToDeadline <= 2) {
+      console.log(chalk.yellow(`  Only ${contention.weeksToDeadline} week(s) left to trade.`));
+    }
+  }
+
+  /**
    * Display a single-player report: what they are worth to you, what to bid,
    * and who to cut for them.
    */

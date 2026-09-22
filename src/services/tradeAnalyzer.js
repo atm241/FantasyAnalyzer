@@ -109,7 +109,8 @@ export class TradeAnalyzer {
   /**
    * Find trade matches between your team and other teams
    */
-  async findTradeMatches(yourRoster, leagueId, yourUserId) {
+  async findTradeMatches(yourRoster, leagueId, yourUserId, contention = null) {
+    this.contention = contention;
     // Get all league rosters and users
     const allRosters = await this.rosterService.api.getLeagueRosters(leagueId);
     const allUsers = await this.rosterService.api.getLeagueUsers(leagueId);
@@ -480,6 +481,15 @@ export class TradeAnalyzer {
    */
   formatTradeAnalysis(tradeMatches, yourNeeds) {
     const lines = [];
+
+    if (this.contention) {
+      if (!this.contention.tradesAllowed) {
+        lines.push(`\n\u26a0\ufe0f  The trade deadline has passed - these are for reference only.`);
+      } else {
+        lines.push(`\n\u2699\ufe0f  ${this.contention.headline}`);
+        lines.push(`   ${this.contention.tradeAdvice}`);
+      }
+    }
 
     lines.push('\n🤝 TRADE OPPORTUNITIES\n');
 

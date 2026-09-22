@@ -11,6 +11,7 @@ import { StandingsAnalyzer } from './services/standings.js';
 import { TradeAnalyzer } from './services/tradeAnalyzer.js';
 import { MatchupService } from './services/matchup.js';
 import { PlayerLookupService } from './services/playerLookup.js';
+import { assessContention } from './services/contention.js';
 import { DisplayFormatter } from './display/formatter.js';
 import readline from 'readline';
 import { getCurrentSeasonYear } from './data/nflSchedule.js';
@@ -373,6 +374,19 @@ async function runAnalyzer(username, leagueId, playerQuery = null) {
     // Analyze league standings and playoff probability
     display.displayInfo('Calculating standings and playoff probability...');
     const standingsAnalysis = await standings.analyzeStandings(user.user_id, league.league_id);
+
+    // Where this team sits in its competitive window. Everything downstream -
+    // how much budget to spend, whether to buy or sell, what to hold - depends
+    // on whether the season is still live.
+    const contention = assessContention({
+      playoffProbability: (standingsAnalysis.playoffProb?.probability ?? 0) / 100,
+      record: standingsAnalysis.userRecord,
+      standing: standingsAnalysis.userRecord?.standing,
+      leagueSize: standingsAnalysis.leagueSize,
+      week: standingsAnalysis.currentWeek,
+      playoffStart: league.settings?.playoff_week_start || 15,
+      tradeDeadline: league.settings?.trade_deadline || null
+    });
     console.log('\n' + '='.repeat(70));
     console.log(standings.formatStandings(standingsAnalysis));
     console.log('='.repeat(70) + '\n');
@@ -390,6 +404,8 @@ async function runAnalyzer(username, leagueId, playerQuery = null) {
       .catch(() => null);
     display.displayMatchup(matchup);
 
+    display.displayContention(contention);
+
     // Display current roster
     const formatted = await rosterService.formatRoster(roster, league.league_id);
     display.displayRoster(formatted);
@@ -401,7 +417,7 @@ async function runAnalyzer(username, leagueId, playerQuery = null) {
 
     // Analyze roster needs
     display.displayInfo('Analyzing roster depth...');
-    const rosterNeeds = await waiverAnalyzer.analyzeRosterNeeds(league.league_id, roster, user.user_id);
+    const rosterNeeds = await waiverAnalyzer.analyzeRosterNeeds(league.league_id, roster, user.user_id, contention);
     display.displayRosterNeeds(rosterNeeds);
 
     // Show trending available players
@@ -418,14 +434,14 @@ async function runAnalyzer(username, leagueId, playerQuery = null) {
 
     // Analyze First to Go (droppable/tradeable players)
     display.displayInfo('Analyzing droppable and tradeable players...');
-    const firstToGoAnalysis = await firstToGo.analyzeFirstToGo(formatted, currentWeek, league.league_id);
+    const firstToGoAnalysis = await firstToGo.analyzeFirstToGo(formatted, currentWeek, league.league_id, contention);
     console.log('\n' + '='.repeat(70));
     console.log(firstToGo.formatFirstToGo(firstToGoAnalysis));
     console.log('='.repeat(70) + '\n');
 
     // Analyze trade opportunities
     display.displayInfo('Finding trade partners based on team needs...');
-    const tradeMatches = await tradeAnalyzer.findTradeMatches(formatted, league.league_id, user.user_id);
+    const tradeMatches = await tradeAnalyzer.findTradeMatches(formatted, league.league_id, user.user_id, contention);
     const economics = await rosterService.getEconomics(league.league_id, formatted);
     const yourNeeds = tradeAnalyzer.calculateTeamNeeds(formatted, economics);
     console.log('\n' + '='.repeat(70));

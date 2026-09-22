@@ -7,6 +7,18 @@ import { realPlayers } from '../utils/playerName.js';
  * broken by which player still has a role to grow into. Sleeper's search_rank
  * orders every player by fantasy relevance, 1 being the most relevant.
  */
+/**
+ * How much a player's long-term outlook counts when deciding who to cut.
+ *
+ * A contender needs points now and can afford to cut a speculative stash; a
+ * team playing for next season should hold that upside over a marginal starter.
+ */
+function upsideWeight(contention) {
+  if (contention?.stage === 'contending') return 0.4;
+  if (contention?.stage === 'rebuilding') return 2.0;
+  return 1.0;
+}
+
 function upsideCredit(searchRank) {
   if (searchRank == null || searchRank >= 9999999) return 0;
   if (searchRank <= 50) return 20;
@@ -64,7 +76,7 @@ export class FirstToGoAnalyzer {
   /**
    * Analyze roster for droppable and tradeable players
    */
-  async analyzeFirstToGo(roster, currentWeek, leagueId = null) {
+  async analyzeFirstToGo(roster, currentWeek, leagueId = null, contention = null) {
     // Calculate position depth
     const positionDepth = {};
     const allPlayers = realPlayers([...roster.starters, ...roster.bench]);
@@ -108,7 +120,8 @@ export class FirstToGoAnalyzer {
           // Projected points decide it, nudged by how much future a player has
           // left. Two bench backs within a few points are not equivalent if one
           // is a well-regarded handcuff and the other is roster filler.
-          holdValue: (restOfSeason ?? player.value) + upsideCredit(player.searchRank)
+          holdValue: (restOfSeason ?? player.value) +
+            upsideCredit(player.searchRank) * upsideWeight(contention)
         };
       })
       .sort((a, b) => a.holdValue - b.holdValue);
@@ -149,6 +162,7 @@ export class FirstToGoAnalyzer {
     const byeBench = benchScored.filter(p => p.onBye);
 
     return {
+      contention,
       bestDrop: bestDrop && {
         ...bestDrop,
         reason: this.getDropReason(bestDrop, positionDepth, ranked)

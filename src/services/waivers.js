@@ -3,6 +3,14 @@ import { isEliteOffense } from '../data/teamRankings.js';
 import { realPlayers } from '../utils/playerName.js';
 import { FANTASY_POSITIONS } from './positionValue.js';
 
+/** Short explanation of why a bid was scaled up or down. */
+function postureNote(contention) {
+  if (!contention) return '';
+  if (contention.faabMultiplier > 1) return 'bid up - you are contending';
+  if (contention.faabMultiplier < 1) return 'bid down - season is gone, bank the budget';
+  return '';
+}
+
 /**
  * Waiver wire analysis and recommendations
  */
@@ -100,11 +108,16 @@ export class WaiverAnalyzer {
     // of the season justifies the maximum share of what is left.
     const REFERENCE_GAIN = 150;
     const share = Math.min(rosGain / REFERENCE_GAIN, 0.35);
-    const amount = Math.max(1, Math.round(budget.remaining * share));
 
+    // A contender should spend - budget left over at the end scores nothing.
+    // A team already out of it should bank it rather than rent help.
+    const posture = context.contention?.faabMultiplier ?? 1;
+    const amount = Math.max(1, Math.round(budget.remaining * share * posture));
+
+    const note = `+${Math.round(rosGain)} pts rest-of-season over your marginal starter`;
     return {
       amount: Math.min(amount, budget.remaining),
-      note: `+${Math.round(rosGain)} pts rest-of-season over your marginal starter`
+      note: posture === 1 ? note : `${note}, ${postureNote(context.contention)}`
     };
   }
 
@@ -212,7 +225,7 @@ export class WaiverAnalyzer {
   /**
    * Analyze roster weaknesses and suggest pickups
    */
-  async analyzeRosterNeeds(leagueId, roster, userId = null) {
+  async analyzeRosterNeeds(leagueId, roster, userId = null, contention = null) {
     const formatted = await this.rosterService.formatRoster(roster, leagueId);
     const rosterPositions = await this.rosterService.getRosterPositions(leagueId);
 
@@ -258,7 +271,10 @@ export class WaiverAnalyzer {
     weakPositions.sort((a, b) => b.priority - a.priority);
 
     const budget = userId ? await this.getWaiverBudget(leagueId, userId) : null;
-    const bidContext = await this.buildBidContext(leagueId, roster);
+    const bidContext = {
+      ...(await this.buildBidContext(leagueId, roster)),
+      contention
+    };
 
     // Get trending data once (performance optimization - avoid repeated API calls)
     const trending = await this.api.getTrendingPlayers('add', 24).catch(() => []);
@@ -287,7 +303,8 @@ export class WaiverAnalyzer {
       targetedPickups,
       positionCounts,
       economics,
-      budget
+      budget,
+      contention
     };
   }
 

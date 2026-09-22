@@ -19,6 +19,20 @@ A comprehensive fantasy football analysis tool supporting **Sleeper** and **ESPN
 npm install
 ```
 
+## Competitive window
+
+Advice is shaped by whether your season is still live. The tool classifies your
+team from playoff odds, record and how far the season has run, then adjusts:
+
+| | Contending | On the bubble | Out of it |
+|---|---|---|---|
+| FAAB | bid up 25% | normal | bid down 60% |
+| Trades | buy win-now | take clear wins only | sell veterans for upside |
+| Drops | cut stashes for starters | keep cheap stashes | hold upside over depth |
+
+Early in the season a losing record is not yet treated as evidence, since odds
+at that point mostly reflect roster strength rather than results.
+
 ## Looking up one player
 
 To answer "should I add this guy, and what should I bid?" without reading the
