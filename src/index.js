@@ -164,6 +164,19 @@ async function selectPlatform() {
  * Report on one player: what they are worth to this roster, what to bid, and
  * who to cut. Handles an ambiguous name by asking which one was meant.
  */
+async function contentionFor(league, user) {
+  const analysis = await standings.analyzeStandings(user.user_id, league.league_id);
+  return assessContention({
+    playoffProbability: (analysis.playoffProb?.probability ?? 0) / 100,
+    record: analysis.userRecord,
+    standing: analysis.userRecord?.standing,
+    leagueSize: analysis.leagueSize,
+    week: analysis.currentWeek,
+    playoffStart: league.settings?.playoff_week_start || 15,
+    tradeDeadline: league.settings?.trade_deadline || null
+  });
+}
+
 async function runPlayerLookup(league, user, query) {
   const candidates = await playerLookup.findCandidates(query);
 
@@ -195,7 +208,11 @@ async function runPlayerLookup(league, user, query) {
     chosen = candidates[pick - 1];
   }
 
-  const report = await playerLookup.analyze(league.league_id, user.user_id, chosen.playerId);
+  // Same competitive posture the full report uses, so bids agree.
+  const contention = await contentionFor(league, user).catch(() => null);
+  const report = await playerLookup.analyze(
+    league.league_id, user.user_id, chosen.playerId, contention
+  );
   if (!report) {
     display.displayError('Could not analyse that player.');
     return;
@@ -378,15 +395,7 @@ async function runAnalyzer(username, leagueId, playerQuery = null) {
     // Where this team sits in its competitive window. Everything downstream -
     // how much budget to spend, whether to buy or sell, what to hold - depends
     // on whether the season is still live.
-    const contention = assessContention({
-      playoffProbability: (standingsAnalysis.playoffProb?.probability ?? 0) / 100,
-      record: standingsAnalysis.userRecord,
-      standing: standingsAnalysis.userRecord?.standing,
-      leagueSize: standingsAnalysis.leagueSize,
-      week: standingsAnalysis.currentWeek,
-      playoffStart: league.settings?.playoff_week_start || 15,
-      tradeDeadline: league.settings?.trade_deadline || null
-    });
+    const contention = await contentionFor(league, user);
     console.log('\n' + '='.repeat(70));
     console.log(standings.formatStandings(standingsAnalysis));
     console.log('='.repeat(70) + '\n');

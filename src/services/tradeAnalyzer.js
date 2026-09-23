@@ -1,6 +1,7 @@
 import { POSITION_SCARCITY, getBasePoints } from '../data/scoringConstants.js';
 import { playerQuality } from '../data/playerQuality.js';
 import { realPlayers } from '../utils/playerName.js';
+import { bestLineupValue } from './lineupValue.js';
 import { isEliteOffense, isWeakOffense, TEAM_MULTIPLIERS } from '../data/teamRankings.js';
 
 /**
@@ -369,43 +370,6 @@ export class TradeAnalyzer {
     return proposals.slice(0, 3); // Top 3 proposals
   }
 
-  /** Which positions each starting slot accepts. */
-  static slotAccepts(slot, position) {
-    if (slot === 'FLEX') return ['RB', 'WR', 'TE'].includes(position);
-    if (slot === 'SUPER_FLEX') return ['QB', 'RB', 'WR', 'TE'].includes(position);
-    if (slot === 'WRRB_FLEX') return ['RB', 'WR'].includes(position);
-    if (slot === 'REC_FLEX') return ['WR', 'TE'].includes(position);
-    return slot === position;
-  }
-
-  /**
-   * Best starting lineup value a set of players can produce for the rest of the
-   * season, filling each slot greedily with the most valuable eligible player.
-   */
-  bestLineupValue(players) {
-    const slots = (this.rosterPositions || []).filter(slot => slot !== 'BN');
-    if (slots.length === 0) return 0;
-
-    const pool = [...players]
-      .map(player => ({ player, value: this.estimateRestOfSeasonPoints(player) }))
-      .sort((a, b) => b.value - a.value);
-
-    const used = new Set();
-    let total = 0;
-
-    for (const slot of slots) {
-      const pick = pool.find(
-        entry => !used.has(entry.player.playerId) &&
-          TradeAnalyzer.slotAccepts(slot, entry.player.position)
-      );
-      if (!pick) continue;
-      used.add(pick.player.playerId);
-      total += pick.value;
-    }
-
-    return total;
-  }
-
   /**
    * What a trade does to the lineup you can actually field.
    *
@@ -421,8 +385,9 @@ export class TradeAnalyzer {
       .filter(player => !givingIds.has(player.playerId))
       .concat(theirPlayers);
 
-    const before = this.bestLineupValue(this.myPlayers);
-    return Math.round(this.bestLineupValue(after) - before);
+    const valueOf = player => this.estimateRestOfSeasonPoints(player);
+    const before = bestLineupValue(this.myPlayers, this.rosterPositions, valueOf);
+    return Math.round(bestLineupValue(after, this.rosterPositions, valueOf) - before);
   }
 
   /**

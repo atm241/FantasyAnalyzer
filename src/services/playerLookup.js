@@ -47,7 +47,7 @@ export class PlayerLookupService {
   /**
    * Build the full picture for one player in the context of your league.
    */
-  async analyze(leagueId, userId, playerId) {
+  async analyze(leagueId, userId, playerId, contention = null) {
     const players = await this.rosterService.loadPlayers();
     const record = players[playerId];
     if (!record) return null;
@@ -104,7 +104,7 @@ export class PlayerLookupService {
     };
 
     if (result.available && myRoster) {
-      result.bid = await this.bidFor(leagueId, userId, myRoster, target, myEconomics);
+      result.bid = await this.bidFor(leagueId, userId, myRoster, target, myEconomics, contention);
       result.drop = await this.dropFor(leagueId, myRoster);
       result.lineupImpact = await this.lineupImpact(leagueId, myRoster, target, outlook);
     }
@@ -113,15 +113,18 @@ export class PlayerLookupService {
   }
 
   /** Suggested FAAB bid, using the same pricing as the waiver report. */
-  async bidFor(leagueId, userId, myRoster, target, economics) {
+  async bidFor(leagueId, userId, myRoster, target, economics, contention = null) {
     const budget = await this.waiverAnalyzer.getWaiverBudget(leagueId, userId);
     if (!budget) return { budget: null };
 
-    const context = await this.waiverAnalyzer.buildBidContext(leagueId, myRoster);
+    const context = {
+      ...(await this.waiverAnalyzer.buildBidContext(leagueId, myRoster)),
+      contention
+    };
     return {
       budget,
       suggestion: this.waiverAnalyzer.suggestBid(target, economics, budget, context),
-      marginal: context.rosMarginal
+      dropping: context.dropping
     };
   }
 

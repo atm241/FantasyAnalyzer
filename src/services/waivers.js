@@ -2,6 +2,7 @@ import { isPlayerLikelyOut } from '../data/scoringConstants.js';
 import { isEliteOffense } from '../data/teamRankings.js';
 import { realPlayers } from '../utils/playerName.js';
 import { FANTASY_POSITIONS } from './positionValue.js';
+import { lineupGainFromAdding } from './lineupValue.js';
 
 /** Short explanation of why a bid was scaled up or down. */
 function postureNote(contention) {
@@ -63,17 +64,36 @@ export class WaiverAnalyzer {
 
     const formatted = await this.rosterService.formatRoster(roster, leagueId);
     const rosterPositions = await this.rosterService.getRosterPositions(leagueId);
-    const startingSlots = rosterPositions.filter(slot => slot !== 'BN').length;
+    const myPlayers = realPlayers([...formatted.starters, ...formatted.bench]);
 
-    // Your starters ranked by rest-of-season value; the last one is the bar a
-    // waiver add has to clear.
-    const ranked = realPlayers([...formatted.starters, ...formatted.bench])
-      .map(rosFor)
-      .sort((a, b) => b - a);
+    // Who a full roster forces you to cut: the least valuable player you hold.
+    const dropping = [...myPlayers].sort((a, b) => rosFor(a) - rosFor(b))[0] || null;
+
+    // Cached because the same candidate is priced more than once per run.
+    const cache = new Map();
 
     return {
       rosFor,
-      rosMarginal: ranked[Math.max(startingSlots - 1, 0)] ?? 0
+      rosterPositions,
+      myPlayers,
+      dropping,
+      /**
+       * What adding this player would do to the lineup you can actually field,
+       * after that drop. A pickup who never starts scores zero here, which is
+       * the honest answer.
+       */
+      lineupGain(player) {
+        if (cache.has(player.playerId)) return cache.get(player.playerId);
+        const gain = lineupGainFromAdding({
+          roster: myPlayers,
+          addition: player,
+          dropping,
+          rosterPositions,
+          valueOf: rosFor
+        });
+        cache.set(player.playerId, gain);
+        return gain;
+      }
     };
   }
 
@@ -92,31 +112,33 @@ export class WaiverAnalyzer {
       return { amount: 0, note: 'not startable in this league' };
     }
 
-    // Priced on the rest of the season, not one week. A bid buys a roster spot
-    // for the remainder, so a player who starts for you every week is worth far
-    // more than one who happens to project well on Sunday.
-    const rosGain = (context.rosFor?.(player) ?? 0) - (context.rosMarginal ?? 0);
+    // What a pickup is worth is what it adds to the lineup you can field, after
+    // the drop a full roster forces - not the player's raw projection.
+    const gain = context.lineupGain ? Math.round(context.lineupGain(player)) : 0;
 
-    if (economy.streamable || rosGain <= 2) {
+    if (gain <= 2) {
       return {
         amount: Math.min(1, budget.remaining),
-        note: economy.streamable ? 'minimum bid - streamable position' : 'minimum bid - no real upgrade'
+        gain,
+        note: economy.streamable
+          ? 'minimum bid - streamable position'
+          : 'minimum bid - would not crack your lineup'
       };
     }
 
-    // A player worth this many points over your marginal starter for the rest
-    // of the season justifies the maximum share of what is left.
+    // A pickup worth this much to your lineup for the rest of the season
+    // justifies the largest share of what is left.
     const REFERENCE_GAIN = 150;
-    const share = Math.min(rosGain / REFERENCE_GAIN, 0.35);
+    const share = Math.min(gain / REFERENCE_GAIN, 0.35);
 
-    // A contender should spend - budget left over at the end scores nothing.
-    // A team already out of it should bank it rather than rent help.
+    // Contenders should spend; a team out of it banks the budget instead.
     const posture = context.contention?.faabMultiplier ?? 1;
     const amount = Math.max(1, Math.round(budget.remaining * share * posture));
 
-    const note = `+${Math.round(rosGain)} pts rest-of-season over your marginal starter`;
+    const note = `+${gain} pts to your starting lineup rest-of-season`;
     return {
       amount: Math.min(amount, budget.remaining),
+      gain,
       note: posture === 1 ? note : `${note}, ${postureNote(context.contention)}`
     };
   }
@@ -291,11 +313,20 @@ export class WaiverAnalyzer {
         trending: trendingIds.has(player.playerId)
       }));
 
-      scored.sort(WaiverAnalyzer.byWaiverValue);
-      targetedPickups[weakness.position] = scored.slice(0, 5).map(player => ({
+      // Rank by what each player would actually add to your starting lineup.
+      // The heuristic score still breaks ties between players who change
+      // nothing, but lineup impact decides the order.
+      const priced = scored.map(player => ({
         ...player,
         bid: this.suggestBid(player, economics, budget, bidContext)
       }));
+
+      priced.sort((a, b) =>
+        ((b.bid?.gain ?? 0) - (a.bid?.gain ?? 0)) ||
+        WaiverAnalyzer.byWaiverValue(a, b)
+      );
+
+      targetedPickups[weakness.position] = priced.slice(0, 5);
     }
 
     return {
