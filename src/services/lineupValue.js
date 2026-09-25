@@ -71,3 +71,44 @@ export function lineupGainFromAdding({ roster, addition, dropping, rosterPositio
 
   return bestLineupValue(after, rosterPositions, valueOf) - before;
 }
+
+/**
+ * What adding a player is worth across every remaining week, summed.
+ *
+ * Valuing a season total hides bye weeks: a backup quarterback looks worthless
+ * because your starter outscores him overall, right up to the week your starter
+ * is off and you have nobody. Pricing each week separately counts a player only
+ * in the weeks he would actually be in your lineup, which is the real answer.
+ *
+ * @param {object} input
+ * @param {object[]} input.roster your current players
+ * @param {object} input.addition the player being added
+ * @param {object} [input.dropping] who you would cut to make room
+ * @param {string[]} input.rosterPositions league slots including BN
+ * @param {number[]} input.weeks remaining weeks to value
+ * @param {function} input.pointsIn (player, week) -> projected points
+ */
+export function weeklyLineupGain({
+  roster, addition, dropping, rosterPositions, weeks, pointsIn
+}) {
+  const cut = dropping || [...roster].sort(
+    (a, b) => totalOver(a, weeks, pointsIn) - totalOver(b, weeks, pointsIn)
+  )[0];
+
+  const after = roster
+    .filter(player => player.playerId !== cut?.playerId)
+    .concat(addition);
+
+  let gain = 0;
+  for (const week of weeks) {
+    const valueOf = player => pointsIn(player, week);
+    gain += bestLineupValue(after, rosterPositions, valueOf) -
+      bestLineupValue(roster, rosterPositions, valueOf);
+  }
+
+  return gain;
+}
+
+function totalOver(player, weeks, pointsIn) {
+  return weeks.reduce((sum, week) => sum + pointsIn(player, week), 0);
+}

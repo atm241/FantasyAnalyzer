@@ -2,7 +2,7 @@ import { isPlayerLikelyOut } from '../data/scoringConstants.js';
 import { isEliteOffense } from '../data/teamRankings.js';
 import { realPlayers } from '../utils/playerName.js';
 import { FANTASY_POSITIONS } from './positionValue.js';
-import { lineupGainFromAdding } from './lineupValue.js';
+import { weeklyLineupGain } from './lineupValue.js';
 
 /** Short explanation of why a bid was scaled up or down. */
 function postureNote(contention) {
@@ -66,6 +66,10 @@ export class WaiverAnalyzer {
     const rosterPositions = await this.rosterService.getRosterPositions(leagueId);
     const myPlayers = realPlayers([...formatted.starters, ...formatted.bench]);
 
+    // Per-week points, so byes are visible rather than averaged away.
+    const pointsIn = (player, week) =>
+      outlook.players?.[player.playerId]?.byWeek?.[week] ?? 0;
+
     // Who a full roster forces you to cut: the least valuable player you hold.
     const dropping = [...myPlayers].sort((a, b) => rosFor(a) - rosFor(b))[0] || null;
 
@@ -79,17 +83,19 @@ export class WaiverAnalyzer {
       dropping,
       /**
        * What adding this player would do to the lineup you can actually field,
-       * after that drop. A pickup who never starts scores zero here, which is
-       * the honest answer.
+       * week by week, after that drop. Counting each week separately is what
+       * makes bye coverage show up - a backup quarterback is worth nothing in
+       * most weeks and a full starter's points in the week yours is off.
        */
       lineupGain(player) {
         if (cache.has(player.playerId)) return cache.get(player.playerId);
-        const gain = lineupGainFromAdding({
+        const gain = weeklyLineupGain({
           roster: myPlayers,
           addition: player,
           dropping,
           rosterPositions,
-          valueOf: rosFor
+          weeks: outlook.weeks || [],
+          pointsIn
         });
         cache.set(player.playerId, gain);
         return gain;
@@ -247,7 +253,7 @@ export class WaiverAnalyzer {
   /**
    * Analyze roster weaknesses and suggest pickups
    */
-  async analyzeRosterNeeds(leagueId, roster, userId = null, contention = null) {
+  async analyzeRosterNeeds(leagueId, roster, userId = null, contention = null, byeOutlook = null) {
     const formatted = await this.rosterService.formatRoster(roster, leagueId);
     const rosterPositions = await this.rosterService.getRosterPositions(leagueId);
 
@@ -275,7 +281,11 @@ export class WaiverAnalyzer {
       const shortOfSlots = current < economy.dedicatedSlots;
       const worthUpgrading = !economy.streamable && economy.priority >= 1;
 
-      if (!shortOfSlots && !worthUpgrading) continue;
+      // A week where you would field nobody at this position is a need no
+      // matter how replaceable the position usually is.
+      const uncoveredWeeks = byeOutlook?.uncovered?.[position] || [];
+
+      if (!shortOfSlots && !worthUpgrading && uncoveredWeeks.length === 0) continue;
 
       weakPositions.push({
         position,
@@ -284,13 +294,19 @@ export class WaiverAnalyzer {
         deficit: Math.max(economy.idealCount - current, shortOfSlots ? 1 : 0),
         priority: economy.priority,
         streamable: economy.streamable,
-        reason: shortOfSlots
-          ? `only ${current} for ${economy.dedicatedSlots} starting slot(s)`
-          : `waivers offer +${economy.priority.toFixed(1)} pts over your marginal starter`
+        uncoveredWeeks,
+        reason: uncoveredWeeks.length
+          ? `nobody to start in week ${uncoveredWeeks.join(', ')} (bye)`
+          : shortOfSlots
+            ? `only ${current} for ${economy.dedicatedSlots} starting slot(s)`
+            : `waivers offer +${economy.priority.toFixed(1)} pts over your marginal starter`
       });
     }
 
-    weakPositions.sort((a, b) => b.priority - a.priority);
+    weakPositions.sort((a, b) =>
+      ((b.uncoveredWeeks?.length || 0) - (a.uncoveredWeeks?.length || 0)) ||
+      (b.priority - a.priority)
+    );
 
     const budget = userId ? await this.getWaiverBudget(leagueId, userId) : null;
     const bidContext = {
@@ -321,8 +337,12 @@ export class WaiverAnalyzer {
         bid: this.suggestBid(player, economics, budget, bidContext)
       }));
 
+      // Lineup gain decides the order, but gains within a couple of points are
+      // not meaningfully different - at that distance prefer the player who is
+      // actually healthy and in demand rather than a doubtful one a point ahead.
+      const bucket = player => Math.round((player.bid?.gain ?? 0) / 2);
       priced.sort((a, b) =>
-        ((b.bid?.gain ?? 0) - (a.bid?.gain ?? 0)) ||
+        (bucket(b) - bucket(a)) ||
         WaiverAnalyzer.byWaiverValue(a, b)
       );
 

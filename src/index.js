@@ -12,16 +12,19 @@ import { TradeAnalyzer } from './services/tradeAnalyzer.js';
 import { MatchupService } from './services/matchup.js';
 import { PlayerLookupService } from './services/playerLookup.js';
 import { assessContention } from './services/contention.js';
+import { buildByeOutlook } from './services/byeOutlook.js';
+import { WatchlistService } from './services/watchlist.js';
 import { DisplayFormatter } from './display/formatter.js';
 import readline from 'readline';
 import { getCurrentSeasonYear } from './data/nflSchedule.js';
 import { getRankingsSeason } from './data/teamRankings.js';
 import { getPlayerName } from './utils/playerName.js';
 import {
-  getSavedLeagues, rememberLeague, forgetLeague, describeLeague, CONFIG_PATH
+  getSavedLeagues, rememberLeague, forgetLeague, describeLeague, CONFIG_PATH,
+  getWatchlist, watchPlayer, unwatchPlayer, recordWatchValues
 } from './utils/savedLeagues.js';
 
-let api, rosterService, optimizer, waiverAnalyzer, aiSummary, firstToGo, standings, tradeAnalyzer, matchupService, playerLookup;
+let api, rosterService, optimizer, waiverAnalyzer, aiSummary, firstToGo, standings, tradeAnalyzer, matchupService, playerLookup, watchlist;
 const display = new DisplayFormatter();
 
 let promptInterface = null;
@@ -177,6 +180,53 @@ async function contentionFor(league, user) {
   });
 }
 
+/** Add or remove a tracked player, resolving the name the same way --player does. */
+async function editWatchlist(league, actions) {
+  const query = actions.watch || actions.unwatch;
+  const adding = Boolean(actions.watch);
+
+  const candidates = await playerLookup.findCandidates(query);
+  if (candidates.length === 0) {
+    display.displayError(`No player found matching '${query}'.`);
+    return;
+  }
+
+  let chosen = candidates[0];
+  if (candidates.length > 1 && !candidates[0].exact) {
+    console.log(`\nSeveral players match '${query}':\n`);
+    candidates.forEach((c, idx) => console.log(
+      `${idx + 1}. ${getPlayerName(c.player).padEnd(24)} ` +
+      `${(c.player.position || '--').padEnd(4)} ${(c.player.team || 'FA')}`
+    ));
+    const answer = (await prompt('\nWhich one? (enter number, blank for 1): ')).trim();
+    const pick = answer === '' ? 1 : Number(answer);
+    if (!Number.isInteger(pick) || pick < 1 || pick > candidates.length) {
+      display.displayError('Not one of the options.');
+      return;
+    }
+    chosen = candidates[pick - 1];
+  }
+
+  const name = getPlayerName(chosen.player);
+
+  if (adding) {
+    const added = watchPlayer(league.league_id, { playerId: chosen.playerId, name });
+    console.log(added
+      ? `\nWatching ${name}. They will appear in every run for this league.`
+      : `\n${name} was already on your watchlist.`);
+  } else {
+    const removed = unwatchPlayer(league.league_id, chosen.playerId);
+    console.log(removed
+      ? `\nStopped watching ${name}.`
+      : `\n${name} was not on your watchlist.`);
+  }
+
+  const remaining = getWatchlist(league.league_id);
+  console.log(remaining.length
+    ? `Watchlist: ${remaining.map(item => item.name).join(', ')}`
+    : 'Watchlist is now empty.');
+}
+
 async function runPlayerLookup(league, user, query) {
   const candidates = await playerLookup.findCandidates(query);
 
@@ -273,7 +323,7 @@ async function selectLeague(username) {
 /**
  * Main application flow
  */
-async function runAnalyzer(username, leagueId, playerQuery = null) {
+async function runAnalyzer(username, leagueId, actions = {}) {
   try {
     let user, league;
 
@@ -310,9 +360,15 @@ async function runAnalyzer(username, leagueId, playerQuery = null) {
       console.log(`Saved "${league.name}" for next time (${CONFIG_PATH}).`);
     }
 
+    // Adding or removing a watched player is a quick edit, not an analysis.
+    if (actions.watch || actions.unwatch) {
+      await editWatchlist(league, actions);
+      return;
+    }
+
     // A single-player lookup answers one question, so it skips the full report.
-    if (playerQuery) {
-      await runPlayerLookup(league, user, playerQuery);
+    if (actions.player) {
+      await runPlayerLookup(league, user, actions.player);
       return;
     }
 
@@ -419,6 +475,32 @@ async function runAnalyzer(username, leagueId, playerQuery = null) {
     const formatted = await rosterService.formatRoster(roster, league.league_id);
     display.displayRoster(formatted);
 
+    const rosterNeedsEconomics = await rosterService.getEconomics(league.league_id, roster);
+
+    // Bye weeks that will cost you, while there is still time to plan.
+    const byeOutlook = buildByeOutlook({
+      roster: [...formatted.starters, ...formatted.bench],
+      rosterPositions: await rosterService.getRosterPositions(league.league_id),
+      outlook: await rosterService.getRestOfSeasonOutlook(league.league_id)
+    });
+    display.displayByeOutlook(byeOutlook);
+
+    // Players being tracked, re-valued against the roster as it stands today.
+    const watched = await watchlist
+      .evaluate(league.league_id, user.user_id, rosterNeedsEconomics, contention)
+      .catch(() => []);
+    display.displayWatchlist(watched);
+
+    // Remember what each was worth, so the next run can show movement.
+    if (watched.length) {
+      recordWatchValues(
+        league.league_id,
+        Object.fromEntries(
+          watched.filter(e => e.gain != null).map(e => [e.playerId, e.gain])
+        )
+      );
+    }
+
     // Analyze lineup
     display.displayInfo('Analyzing optimal lineup...');
     const lineupAnalysis = await optimizer.analyzeLineup(league.league_id, roster);
@@ -426,7 +508,7 @@ async function runAnalyzer(username, leagueId, playerQuery = null) {
 
     // Analyze roster needs
     display.displayInfo('Analyzing roster depth...');
-    const rosterNeeds = await waiverAnalyzer.analyzeRosterNeeds(league.league_id, roster, user.user_id, contention);
+    const rosterNeeds = await waiverAnalyzer.analyzeRosterNeeds(league.league_id, roster, user.user_id, contention, byeOutlook);
     display.displayRosterNeeds(rosterNeeds);
 
     // Show trending available players
@@ -504,6 +586,8 @@ program
   .option('-s, --season <season>', 'Season year (defaults to the current NFL season)', String(getCurrentSeasonYear()))
   .option('--refresh', 'Ignore the cached player index and refetch it')
   .option('--player <name>', 'Look up one player: value, FAAB bid, who to drop')
+  .option('--watch <name>', 'Track a player and report on them every run')
+  .option('--unwatch <name>', 'Stop tracking a player')
   .action(async (options) => {
     console.log('Welcome to Fantasy Analyzer!\n');
 
@@ -613,9 +697,14 @@ program
     tradeAnalyzer = new TradeAnalyzer(rosterService);
     matchupService = new MatchupService(api, rosterService, optimizer);
     playerLookup = new PlayerLookupService(api, rosterService, waiverAnalyzer, firstToGo);
+    watchlist = new WatchlistService(api, rosterService, waiverAnalyzer);
 
     try {
-      await runAnalyzer(options.username, options.league, options.player);
+      await runAnalyzer(options.username, options.league, {
+        player: options.player,
+        watch: options.watch,
+        unwatch: options.unwatch
+      });
     } finally {
       closePrompt();
     }

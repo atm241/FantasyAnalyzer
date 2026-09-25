@@ -92,4 +92,60 @@ export function describeLeague(entry) {
   return `${name} (${platform}${who})`;
 }
 
+/**
+ * Players you are tracking in a league, stored per league so two leagues do not
+ * share a list. Each entry keeps the last value seen, which is what lets the
+ * report show whether a player is rising or fading since you last looked.
+ */
+export function getWatchlist(leagueId) {
+  const config = loadConfig();
+  return config.watchlists?.[leagueId] || [];
+}
+
+export function watchPlayer(leagueId, entry) {
+  const config = loadConfig();
+  config.watchlists ||= {};
+  const list = (config.watchlists[leagueId] ||= []);
+
+  const existing = list.find(item => item.playerId === entry.playerId);
+  if (existing) {
+    Object.assign(existing, entry);
+    saveConfig(config);
+    return false;
+  }
+
+  list.push({ ...entry, addedAt: new Date().toISOString() });
+  saveConfig(config);
+  return true;
+}
+
+export function unwatchPlayer(leagueId, playerId) {
+  const config = loadConfig();
+  const list = config.watchlists?.[leagueId];
+  if (!list) return false;
+
+  const index = list.findIndex(item => item.playerId === playerId);
+  if (index === -1) return false;
+
+  list.splice(index, 1);
+  saveConfig(config);
+  return true;
+}
+
+/** Record what each watched player was worth, so movement can be shown later. */
+export function recordWatchValues(leagueId, values) {
+  const config = loadConfig();
+  const list = config.watchlists?.[leagueId];
+  if (!list) return;
+
+  for (const item of list) {
+    const seen = values[item.playerId];
+    if (seen === undefined) continue;
+    item.lastGain = seen;
+    item.lastSeen = new Date().toISOString();
+  }
+
+  saveConfig(config);
+}
+
 export { CONFIG_PATH };

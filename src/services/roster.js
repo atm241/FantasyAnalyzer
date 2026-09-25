@@ -2,6 +2,7 @@ import { isOnBye, getByeWeek, loadSchedule } from '../data/nflSchedule.js';
 import { loadTeamRankings } from '../data/teamRankings.js';
 import { getPlayerName, isEmptySlot, realPlayers } from '../utils/playerName.js';
 import { buildPositionEconomics, FANTASY_POSITIONS } from './positionValue.js';
+import { getInjuryMultiplier } from '../data/scoringConstants.js';
 
 /** Last week of the NFL regular season. */
 const REGULAR_SEASON_END = 18;
@@ -348,12 +349,24 @@ export class RosterService {
       else weeksCounted.push(number);
 
       for (const [playerId, line] of Object.entries(stats || {})) {
-        const points = this.pointsFor(line, scoringSettings);
+        let points = this.pointsFor(line, scoringSettings);
         if (points == null) continue;
 
+        // Injury designations apply to the week they are issued, not the rest
+        // of the season - a player doubtful this Sunday is usually fine later.
+        // Without this a doubtful quarterback was topping the waiver board.
+        if (number === week) {
+          points *= getInjuryMultiplier(this.getPlayer(playerId)?.injury_status);
+        }
+
         const entry = (outlook[playerId] ||= {
-          restOfSeason: 0, playoff: 0, weeksProjected: 0, playoffWeeksProjected: 0
+          restOfSeason: 0, playoff: 0, weeksProjected: 0, playoffWeeksProjected: 0,
+          // Per-week points, so a lineup can be valued week by week rather than
+          // only in season totals. A week a player is missing is a bye.
+          byWeek: {}
         });
+
+        entry.byWeek[number] = points;
 
         if (isPlayoff) {
           entry.playoff += points;
@@ -370,7 +383,8 @@ export class RosterService {
       fromWeek: week,
       playoffStart,
       regularWeeks: weeksCounted.length,
-      playoffWeeks: playoffWeeks.length
+      playoffWeeks: playoffWeeks.length,
+      weeks: [...weeksCounted, ...playoffWeeks].sort((a, b) => a - b)
     };
     return this.rosOutlook;
   }

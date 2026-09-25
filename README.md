@@ -19,6 +19,39 @@ A comprehensive fantasy football analysis tool supporting **Sleeper** and **ESPN
 npm install
 ```
 
+## Watching players
+
+Track free agents you are interested in and they are re-valued against your
+roster on every run:
+
+```bash
+npm start -- --watch "C.J. Stroud"
+npm start -- --unwatch "C.J. Stroud"
+```
+
+```
+WATCHING
+  AJ Barner    TE  SEA  FREE AGENT  +21 pts to your lineup  bid $15  up 6
+  C.J. Stroud  QB  HOU  FREE AGENT  +16 pts to your lineup  bid $11
+  Carnell Tate WR  TEN  rostered by Gorpes
+
+  2 worth claiming now: AJ Barner ($15), C.J. Stroud ($11)
+```
+
+Each run records what a player was worth, so the next one shows whether they are
+rising or fading. Lists are kept per league in `config.json`.
+
+## Bye weeks
+
+Byes are projected forward across the whole season, not just checked for the
+current week. Weeks where byes gut your lineup are flagged while there is still
+time to claim cover, and a position with a week you could field nobody is
+treated as a need however streamable it usually is.
+
+Waiver value is calculated week by week rather than from season totals, which is
+what makes this work: a backup quarterback is worth nothing in most weeks and a
+full starter's points in the week yours is off.
+
 ## Competitive window
 
 Advice is shaped by whether your season is still live. The tool classifies your

@@ -40,6 +40,101 @@ export class DisplayFormatter {
   }
 
   /**
+   * Display the players you are tracking and whether any are worth claiming.
+   */
+  displayWatchlist(entries) {
+    if (!entries?.length) return;
+
+    console.log('\n' + chalk.bold.magenta('WATCHING'));
+
+    // Anything that would actually improve the lineup leads.
+    const ranked = [...entries].sort((a, b) => (b.gain ?? -1) - (a.gain ?? -1));
+
+    for (const entry of ranked) {
+      if (entry.missing) {
+        console.log(`  ${chalk.gray(entry.name || entry.playerId)} - no longer in the player index`);
+        continue;
+      }
+
+      const tag = entry.mine
+        ? chalk.green('on your roster')
+        : entry.owner
+          ? chalk.yellow(`rostered by ${entry.owner}`)
+          : chalk.bold.green('FREE AGENT');
+
+      const movement = entry.change == null || entry.change === 0
+        ? ''
+        : entry.change > 0
+          ? chalk.green(`  up ${entry.change}`)
+          : chalk.red(`  down ${Math.abs(entry.change)}`);
+
+      const worth = entry.gain == null
+        ? ''
+        : entry.gain > 2
+          ? chalk.bold.green(`  +${entry.gain} pts to your lineup`)
+          : chalk.gray(`  +${entry.gain} pts - would not start`);
+
+      const bid = entry.bid && entry.gain > 2
+        ? chalk.bold(`  bid $${entry.bid.amount}`)
+        : '';
+
+      console.log(
+        `  ${entry.name.padEnd(22)} ${(entry.position || '--').padEnd(4)} ` +
+        `${(entry.team || 'FA').padEnd(4)} ${tag}${worth}${bid}${movement}`
+      );
+    }
+
+    const claimable = ranked.filter(e => e.available && e.gain > 2);
+    if (claimable.length) {
+      console.log(
+        '\n  ' + chalk.bold.green(`${claimable.length} worth claiming now: `) +
+        claimable.map(e => `${e.name} ($${e.bid?.amount ?? '?'})`).join(', ')
+      );
+    }
+  }
+
+  /**
+   * Warn about weeks ahead where byes gut the lineup, while there is still
+   * time to do something about it.
+   */
+  displayByeOutlook(byeOutlook) {
+    if (!byeOutlook?.trouble?.length) return;
+
+    console.log('\n' + chalk.bold.yellow('BYE WEEKS TO PLAN FOR'));
+
+    byeOutlook.trouble.forEach(week => {
+      const lost = Math.round(week.shortfall * 100);
+      console.log(
+        `\n  ${chalk.bold('Week ' + week.week)}  ` +
+        chalk.red(`-${lost}% of a normal lineup`) +
+        chalk.gray(`  (${Math.round(week.value)} vs ${Math.round(week.baseline)} typical)`)
+      );
+
+      // Group by position so a missing quarterback is obvious at a glance.
+      const byPosition = {};
+      for (const player of week.onBye) {
+        (byPosition[player.position] ||= []).push(player.name);
+      }
+      const summary = Object.entries(byPosition)
+        .map(([position, names]) => `${position}: ${names.join(', ')}`)
+        .join('  |  ');
+      console.log(chalk.gray(`  Out - ${summary}`));
+
+      // Losing every player at a position you must start is the real problem.
+      const wipedOut = Object.keys(byPosition).filter(position =>
+        ['QB', 'TE', 'DEF', 'K'].includes(position)
+      );
+      if (wipedOut.length) {
+        console.log(
+          chalk.red(`  You may have no ${wipedOut.join('/')} to start that week.`)
+        );
+      }
+    });
+
+    console.log(chalk.gray('\n  Plan waiver claims around these before the week arrives.'));
+  }
+
+  /**
    * Display the team's competitive window and what it implies.
    */
   displayContention(contention) {
