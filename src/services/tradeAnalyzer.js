@@ -1,7 +1,7 @@
 import { POSITION_SCARCITY, getBasePoints } from '../data/scoringConstants.js';
 import { playerQuality } from '../data/playerQuality.js';
 import { realPlayers } from '../utils/playerName.js';
-import { bestLineupValue } from './lineupValue.js';
+import { bestLineupValue, weeklyLineupGain } from './lineupValue.js';
 import { isEliteOffense, isWeakOffense, TEAM_MULTIPLIERS } from '../data/teamRankings.js';
 
 /**
@@ -132,51 +132,54 @@ export class TradeAnalyzer {
 
     const tradeMatches = [];
 
-    // Analyze each opponent
     for (const opponentRoster of allRosters) {
-      if (opponentRoster.owner_id === yourUserId) continue; // Skip your own team
+      if (opponentRoster.owner_id === yourUserId) continue;
 
-      // Format opponent roster
       const opponentFormatted = await this.rosterService.formatRoster(opponentRoster, leagueId);
-      const opponentNeeds = this.calculateTeamNeeds(opponentFormatted, this.economics);
+      const theirPlayers = realPlayers([
+        ...opponentFormatted.starters,
+        ...opponentFormatted.bench
+      ]);
 
-      // Find complementary needs (you have surplus where they have deficit, vice versa)
-      const matches = this.findComplementaryNeeds(
-        yourNeeds,
-        opponentNeeds,
-        yourFormattedRoster,
-        opponentFormatted,
-        opponentRoster
-      );
+      // Swaps that leave both lineups better off.
+      const upgrades = this.findMutualUpgrades(this.myPlayers, theirPlayers);
+      if (upgrades.length === 0) continue;
 
-      if (matches.length > 0) {
-        // Get opponent user info
-        const opponentUser = allUsers.find(u => u.user_id === opponentRoster.owner_id);
-        const displayName = opponentUser?.display_name ||
-                           opponentUser?.metadata?.team_name ||
-                           `Team ${opponentRoster.roster_id}`;
+      const opponentUser = allUsers.find(u => u.user_id === opponentRoster.owner_id);
+      const displayName = opponentUser?.metadata?.team_name ||
+                         opponentUser?.display_name ||
+                         `Team ${opponentRoster.roster_id}`;
 
-        // Generate specific trade proposals
-        const proposals = this.generateTradeProposal(
-          yourFormattedRoster,
-          opponentFormatted,
-          yourNeeds,
-          opponentNeeds
-        );
+      const proposals = upgrades.map(upgrade => this.createTradeProposal(
+        upgrade.giving.map(player => this.describeForTrade(player, true)),
+        upgrade.getting.map(player => this.describeForTrade(player, false)),
+        upgrade.giving.length > upgrade.getting.length
+          ? `Consolidate ${upgrade.giving.length} into 1`
+          : upgrade.getting.length > upgrade.giving.length
+            ? `You get ${upgrade.getting.length} for ${upgrade.giving.length}`
+            : 'One for one',
+        upgrade
+      ));
 
-        tradeMatches.push({
-          teamId: opponentRoster.roster_id,
-          ownerId: opponentRoster.owner_id,
-          username: displayName,
-          record: `${opponentRoster.settings?.wins || 0}-${opponentRoster.settings?.losses || 0}`,
-          matches,
-          proposals
-        });
-      }
+      tradeMatches.push({
+        teamId: opponentRoster.roster_id,
+        ownerId: opponentRoster.owner_id,
+        username: displayName,
+        record: `${opponentRoster.settings?.wins || 0}-${opponentRoster.settings?.losses || 0}`,
+        // Kept for the fallback renderer; discovery no longer depends on it.
+        matches: upgrades.map(u => ({
+          yourPlayer: u.giving[0],
+          theirNeed: u.getting[0]?.position,
+          theirDeficit: u.theirGain,
+          matchScore: Math.min(100, Math.round(u.myGain))
+        })),
+        proposals,
+        bestGain: upgrades[0].myGain
+      });
     }
 
-    // Sort by match quality (number of good matches)
-    tradeMatches.sort((a, b) => b.matches.length - a.matches.length);
+    // Best offer for you first.
+    tradeMatches.sort((a, b) => b.bestGain - a.bestGain);
 
     return tradeMatches;
   }
@@ -370,6 +373,105 @@ export class TradeAnalyzer {
     return proposals.slice(0, 3); // Top 3 proposals
   }
 
+  /** Rest-of-season value of a player, for lineup simulation. */
+  valueOf(player) {
+    return this.estimateRestOfSeasonPoints(player);
+  }
+
+  /** Lineup value of a set of players over the rest of the season. */
+  lineupValueOf(players) {
+    return bestLineupValue(players, this.rosterPositions, p => this.valueOf(p));
+  }
+
+  /**
+   * Find swaps that improve both lineups.
+   *
+   * Discovery used to require a positional "deficit" on one side and a
+   * "surplus" on the other. Once ideal roster sizes became league-aware almost
+   * nobody registered a deficit, so the whole feature returned nothing. Real
+   * trades happen when both teams field a better lineup, which is what this
+   * searches for directly.
+   */
+  findMutualUpgrades(mine, theirs) {
+    if (!this.rosterPositions?.length) return [];
+
+    const MIN_GAIN = 5;          // ignore noise-level differences
+    const CANDIDATES = 10;       // cap the search, biggest movers first
+
+    const myBase = this.lineupValueOf(mine);
+    const theirBase = this.lineupValueOf(theirs);
+
+    // Players who could plausibly move: not the single most valuable asset on
+    // either side, since nobody trades their best player for depth.
+    const byValue = players => [...players]
+      .sort((a, b) => this.valueOf(b) - this.valueOf(a));
+
+    const myPool = byValue(mine).slice(1, CANDIDATES + 1);
+    const theirPool = byValue(theirs).slice(1, CANDIDATES + 1);
+
+    const upgrades = [];
+
+    const consider = (giving, getting) => {
+      const givingIds = new Set(giving.map(p => p.playerId));
+      const gettingIds = new Set(getting.map(p => p.playerId));
+
+      const myAfter = this.lineupValueOf(
+        mine.filter(p => !givingIds.has(p.playerId)).concat(getting)
+      );
+      const theirAfter = this.lineupValueOf(
+        theirs.filter(p => !gettingIds.has(p.playerId)).concat(giving)
+      );
+
+      const myGain = Math.round(myAfter - myBase);
+      const theirGain = Math.round(theirAfter - theirBase);
+
+      // Both sides must come out ahead or there is no deal to propose.
+      if (myGain < MIN_GAIN || theirGain < MIN_GAIN) return;
+
+      upgrades.push({ giving, getting, myGain, theirGain });
+    };
+
+    // One for one.
+    for (const give of myPool) {
+      for (const get of theirPool) consider([give], [get]);
+    }
+
+    // Two of your depth for one of their better players, and the reverse. This
+    // is where a lineup view matters: consolidating depth into a starter helps,
+    // splitting a starter into depth usually does not.
+    for (const get of theirPool.slice(0, 5)) {
+      for (let i = 0; i < myPool.length; i++) {
+        for (let j = i + 1; j < myPool.length; j++) {
+          consider([myPool[i], myPool[j]], [get]);
+        }
+      }
+    }
+
+    for (const give of myPool.slice(0, 5)) {
+      for (let i = 0; i < theirPool.length; i++) {
+        for (let j = i + 1; j < theirPool.length; j++) {
+          consider([give], [theirPool[i], theirPool[j]]);
+        }
+      }
+    }
+
+    // Best for you first, then by how easily they should accept.
+    upgrades.sort((a, b) => (b.myGain - a.myGain) || (b.theirGain - a.theirGain));
+
+    // Drop near-duplicates that offer the same player of yours repeatedly.
+    const seen = new Set();
+    const distinct = [];
+    for (const upgrade of upgrades) {
+      const key = upgrade.giving.map(p => p.playerId).sort().join('+');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      distinct.push(upgrade);
+      if (distinct.length >= 3) break;
+    }
+
+    return distinct;
+  }
+
   /**
    * What a trade does to the lineup you can actually field.
    *
@@ -393,7 +495,17 @@ export class TradeAnalyzer {
   /**
    * Create a structured trade proposal with evaluation
    */
-  createTradeProposal(yourPlayers, theirPlayers, tradeType) {
+  /** Shape a roster entry for trade display and valuation. */
+  describeForTrade(player, isMine) {
+    return {
+      ...player,
+      tradeValue: this.calculatePlayerTradeValue(player, {}, isMine),
+      restOfSeasonPoints: this.estimateRestOfSeasonPoints(player),
+      playoffPoints: this.playoffPoints(player)
+    };
+  }
+
+  createTradeProposal(yourPlayers, theirPlayers, tradeType, upgrade = null) {
     const yourValue = yourPlayers.reduce((sum, p) => sum + p.tradeValue, 0);
     const theirValue = theirPlayers.reduce((sum, p) => sum + p.tradeValue, 0);
 
@@ -402,7 +514,9 @@ export class TradeAnalyzer {
 
     const pointsDiff = theirPoints - yourPoints;
     const valueDiff = theirValue - yourValue;
-    const lineupGain = this.lineupImpactOf(yourPlayers, theirPlayers);
+    // Discovery already measured both lineups; prefer those numbers.
+    const lineupGain = upgrade?.myGain ?? this.lineupImpactOf(yourPlayers, theirPlayers);
+    const theirLineupGain = upgrade?.theirGain ?? null;
 
     // The verdict follows what your startable lineup gains, not the raw sum.
     const verdictBasis = lineupGain ?? pointsDiff;
@@ -418,6 +532,7 @@ export class TradeAnalyzer {
       theirProjectedPoints: theirPoints,
       projectedPointsGain: pointsDiff,
       lineupGain,
+      theirLineupGain,
       winner: verdictBasis > 5 ? 'you' : verdictBasis < -5 ? 'them' : 'fair'
     };
   }
@@ -463,7 +578,7 @@ export class TradeAnalyzer {
       return lines.join('\n');
     }
 
-    lines.push('Teams with complementary needs:\n');
+    lines.push('Swaps that improve both lineups:\n');
 
     tradeMatches.forEach((match, idx) => {
       if (idx >= 3) return; // Show top 3 teams with proposals
@@ -505,6 +620,16 @@ export class TradeAnalyzer {
                 ? '  (raw points favour you, but only one of them can start)'
                 : '')
             );
+          }
+
+          if (proposal.theirLineupGain != null) {
+            const theirs = proposal.theirLineupGain;
+            const likelihood = theirs >= 30
+              ? 'they should say yes quickly'
+              : theirs >= 15
+                ? 'reasonable ask'
+                : 'thin for them - may need a sweetener';
+            lines.push(`     Their starting lineup: +${theirs} pts  (${likelihood})`);
           }
 
           const margin = Math.abs(proposal.lineupGain ?? proposal.projectedPointsGain);

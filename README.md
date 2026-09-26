@@ -80,6 +80,20 @@ they are a free agent or need a trade, where they would rank among the players
 you can actually start, a suggested FAAB bid, and who to drop to make room.
 Partial names work; ambiguous ones prompt.
 
+## Tests
+
+```bash
+npm test
+```
+
+Forty tests over the valuation core, using node's built-in runner - no
+dependencies, no network, and no reliance on what any real roster looks like
+this week. They pin down behaviour that has broken before: the week rolling over
+during Monday night football, a defence rendering as "undefined", two mid
+players appearing to outweigh one stud, a position the league never starts being
+treated as a priority, and a highly ranked player buried on his depth chart
+being valued as a starter.
+
 ## Keeping season data current
 
 Everything season-specific is derived at runtime, so the tool rolls into a new
