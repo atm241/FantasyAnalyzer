@@ -1,3 +1,5 @@
+import { bestLineupValue } from './lineupValue.js';
+import { realPlayers } from '../utils/playerName.js';
 /**
  * League standings and playoff probability analysis
  */
@@ -149,6 +151,72 @@ export class StandingsAnalyzer {
   }
 
   /**
+   * What each team is projected to score, week by week.
+   *
+   * The simulation used to forecast from points per game, which after two
+   * games is mostly luck - the spread across this league was 312 to 181 on a
+   * two-game sample. Projecting the lineup each team can actually field is a
+   * far better estimate, and bye weeks fall out of it for free because a player
+   * on bye simply has no projection that week.
+   */
+  async buildStrengthModel(leagueId, rosters) {
+    if (this.strengthModel) return this.strengthModel;
+
+    const [outlook, rosterPositions] = await Promise.all([
+      this.rosterService.getRestOfSeasonOutlook(leagueId),
+      this.rosterService.getRosterPositions(leagueId)
+    ]);
+
+    const model = {};
+
+    for (const roster of rosters) {
+      const formatted = await this.rosterService.formatRoster(roster, leagueId);
+      const players = realPlayers([...formatted.starters, ...formatted.bench]);
+
+      const weekly = {};
+      for (const week of outlook.weeks || []) {
+        weekly[week] = bestLineupValue(
+          players,
+          rosterPositions,
+          player => outlook.players?.[player.playerId]?.byWeek?.[week] ?? 0
+        );
+      }
+
+      const values = Object.values(weekly);
+      model[roster.roster_id] = {
+        weekly,
+        average: values.length
+          ? values.reduce((sum, v) => sum + v, 0) / values.length
+          : 0
+      };
+    }
+
+    this.strengthModel = { model, weeks: outlook.weeks || [] };
+    return this.strengthModel;
+  }
+
+  /**
+   * What a team should score in a given week.
+   *
+   * Projections carry the forecast, but once real results accumulate they carry
+   * information too, so actual scoring is blended in as the sample grows.
+   */
+  expectedScore(record, strength, week) {
+    const projected = strength?.weekly?.[week] ?? strength?.average ?? 0;
+
+    const gamesPlayed = record.wins + record.losses + record.ties;
+    if (gamesPlayed === 0 || !projected) {
+      return projected || this.calculateAdjustedPPG(record, week);
+    }
+
+    const actual = record.pointsFor / gamesPlayed;
+    // Two games say little; ten say a good deal. Never let history dominate.
+    const actualWeight = Math.min(gamesPlayed / 20, 0.5);
+
+    return projected * (1 - actualWeight) + actual * actualWeight;
+  }
+
+  /**
    * Calculate average points per game adjusting for BYE weeks
    */
   calculateAdjustedPPG(record, currentWeek) {
@@ -160,32 +228,6 @@ export class StandingsAnalyzer {
   }
 
   /**
-   * Estimate team strength including future BYE weeks
-   */
-  async estimateTeamStrength(rosterId, rosters, currentWeek, remainingWeeks) {
-    const roster = rosters.find(r => r.roster_id === rosterId);
-    if (!roster) return 0;
-
-    // Get base points per game from record
-    const record = roster.record || { pointsFor: 0, wins: 0, losses: 0, ties: 0 };
-    const gamesPlayed = record.wins + record.losses + record.ties;
-    const basePPG = gamesPlayed > 0 ? record.pointsFor / gamesPlayed : 0;
-
-    // Check for upcoming BYE weeks in remaining schedule
-    // This is simplified - in production you'd analyze actual roster
-    // Week 5-14 have various BYE weeks, adjust strength slightly
-    let byeWeekPenalty = 0;
-    for (let week = currentWeek; week <= currentWeek + remainingWeeks; week++) {
-      // Simplified: assume ~2-3 players affected per BYE week
-      if (week >= 5 && week <= 14) {
-        byeWeekPenalty += 0.5; // Small penalty per potential BYE week
-      }
-    }
-
-    return Math.max(0, basePPG - byeWeekPenalty);
-  }
-
-  /**
    * Simulate remaining season using Monte Carlo
    */
   async simulateRemainingSeason(
@@ -194,7 +236,8 @@ export class StandingsAnalyzer {
     rosters,
     futureMatchups,
     currentWeek,
-    iterations = 10000
+    iterations = 2000,
+    strength = null
   ) {
     let playoffAppearances = 0;
     const random = seededRandom(seedFrom(allRecords, currentWeek));
@@ -229,12 +272,15 @@ export class StandingsAnalyzer {
             if (!record1 || !record2) return;
 
             // Estimate points based on PPG with randomness
-            const ppg1 = this.calculateAdjustedPPG(record1, currentWeek + weekIdx);
-            const ppg2 = this.calculateAdjustedPPG(record2, currentWeek + weekIdx);
+            // Expected score from the lineup each team can field that week,
+            // blended with how they have actually scored so far.
+            const week = currentWeek + weekIdx;
+            const expected1 = this.expectedScore(record1, strength?.[record1.rosterId], week);
+            const expected2 = this.expectedScore(record2, strength?.[record2.rosterId], week);
 
             // Add variance (±20% standard deviation)
-            const points1 = ppg1 * (0.8 + random() * 0.4);
-            const points2 = ppg2 * (0.8 + random() * 0.4);
+            const points1 = expected1 * (0.8 + random() * 0.4);
+            const points2 = expected2 * (0.8 + random() * 0.4);
 
             // Update records
             if (points1 > points2) {
@@ -324,13 +370,24 @@ export class StandingsAnalyzer {
 
     if (futureMatchups.length > 0 && futureMatchups.some(m => m.length > 0)) {
       // Use simulation for more accurate probability
+      // Projected lineup strength per team, which replaces forecasting from a
+      // handful of games of scoring history.
+      let strength = null;
+      try {
+        strength = (await this.buildStrengthModel(leagueId, rosters)).model;
+      } catch {
+        // No projections available - the simulation falls back to scoring history.
+      }
+
       probability = await this.simulateRemainingSeason(
         record,
         allRecords,
         rosters,
         futureMatchups,
         currentWeek,
-        500 // iterations
+        // The estimate is stable well below this; more iterations only cost time.
+        2000,
+        strength
       );
     } else {
       // Fallback to heuristic-based calculation

@@ -52,6 +52,18 @@ Waiver value is calculated week by week rather than from season totals, which is
 what makes this work: a backup quarterback is worth nothing in most weeks and a
 full starter's points in the week yours is off.
 
+## Playoff odds
+
+Odds come from a Monte Carlo simulation of the remaining schedule. Each team's
+weekly score is projected from the lineup they can actually field, blended with
+how they have scored so far - weighted by how many games there are to learn
+from, and capped so history never outweighs the projection.
+
+Forecasting from points per game alone was the weak point: after two games the
+spread across a league is mostly luck, and the simulation treated it as signal.
+The run is seeded from league state, so the same inputs always give the same
+number.
+
 ## Competitive window
 
 Advice is shaped by whether your season is still live. The tool classifies your
