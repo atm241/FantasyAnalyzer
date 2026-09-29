@@ -250,6 +250,67 @@ export class DisplayFormatter {
   }
 
   /**
+   * The live Sunday scoreboard: both lineups side by side, slot by slot.
+   */
+  displayLiveMatchup(live) {
+    if (!live) return;
+
+    const { you, opponent } = live;
+    const width = 30;
+
+    console.log('\n' + chalk.bold.cyan('='.repeat(70)));
+    console.log(chalk.bold.cyan(`WEEK ${live.week} - LIVE`));
+    console.log(chalk.bold.cyan('='.repeat(70)));
+
+    const leading = live.margin >= 0;
+    console.log(
+      '\n' + (leading ? chalk.bold.green : chalk.bold)(you.teamName.slice(0, width - 8).padEnd(width - 8)) +
+      (leading ? chalk.bold.green : chalk.bold)(you.total.toFixed(1).padStart(7)) +
+      '   ' +
+      (leading ? chalk.bold : chalk.bold.red)(opponent.total.toFixed(1).padEnd(7)) +
+      (leading ? chalk.bold : chalk.bold.red)(opponent.teamName.slice(0, width - 8))
+    );
+
+    const margin = Math.abs(live.margin).toFixed(1);
+    console.log(
+      chalk.gray('  ') +
+      (leading ? chalk.green(`leading by ${margin}`) : chalk.red(`trailing by ${margin}`))
+    );
+
+    console.log('\n' + chalk.gray('  SLOT   ' + 'YOU'.padEnd(width) + 'THEM'));
+    console.log(chalk.gray('  ' + '-'.repeat(66)));
+
+    you.starters.forEach((mine, index) => {
+      const theirs = opponent.starters[index];
+      console.log(
+        '  ' + chalk.bold(mine.slot.padEnd(6)) + ' ' +
+        this.livePlayer(mine, theirs, width) + ' ' +
+        this.livePlayer(theirs, mine, width)
+      );
+    });
+
+    console.log('\n' + chalk.bold.cyan('='.repeat(70)) + '\n');
+  }
+
+  /** One side of a live slot: name, team and points, tinted by who is winning it. */
+  livePlayer(player, rival, width) {
+    if (!player) return ''.padEnd(width);
+
+    const label = player.empty
+      ? chalk.red('(empty)')
+      : `${player.name.slice(0, 18)} ${chalk.gray(player.team)}`;
+
+    const points = (player.points ?? 0).toFixed(1);
+    const winning = (player.points ?? 0) > (rival?.points ?? 0);
+    const tinted = winning ? chalk.green(points.padStart(6)) : chalk.gray(points.padStart(6));
+
+    // Pad on the visible text, since colour codes do not occupy columns.
+    const visible = player.empty ? '(empty)' : `${player.name.slice(0, 18)} ${player.team}`;
+    const pad = Math.max(width - visible.length - 7, 0);
+    return label + ' '.repeat(pad) + tinted;
+  }
+
+  /**
    * Display this week's head-to-head matchup
    */
   displayMatchup(matchup) {
@@ -365,10 +426,29 @@ export class DisplayFormatter {
       console.log(`\n${chalk.bold.yellow(position)}:`);
       players.slice(0, limit).forEach((player, idx) => {
         if (player && player.name) {
-          const trending = player.trending ? chalk.red('🔥 TRENDING') : '';
-          const score = chalk.cyan(`[Score: ${player.waiverScore}]`);
-          const status = this.getStatusIndicator(player);
-          console.log(`${idx + 1}. ${player.name.padEnd(25)} ${(player.team || 'FA').padEnd(4)} ${status.padEnd(10)} ${score} ${trending}`);
+          const trending = player.trending ? chalk.red('🔥') : '  ';
+
+          // A player with nothing this week but real value later is not a dud.
+          // An injury designation still wins: it is the more urgent fact.
+          const notYet = player.projected === false &&
+            player.bid?.gain > 2 &&
+            !player.injuryStatus &&
+            !player.onBye;
+          const status = notYet ? chalk.gray('LATER') : this.getStatusIndicator(player);
+
+          // What to bid, which is the decision this board exists to support.
+          const worthIt = player.bid?.gain > 2;
+          const bid = player.bid
+            ? (worthIt
+                ? chalk.bold.green(`$${player.bid.amount}`.padStart(5))
+                : chalk.gray(`$${player.bid.amount}`.padStart(5)))
+            : chalk.gray('    -');
+          const worth = worthIt ? chalk.gray(` +${player.bid.gain} pts`) : '';
+
+          console.log(
+            `${idx + 1}. ${player.name.padEnd(24)} ${(player.team || 'FA').padEnd(4)} ` +
+            `${status.padEnd(10)} ${bid}${worth} ${trending}`
+          );
         }
       });
     }

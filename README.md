@@ -19,6 +19,26 @@ A comprehensive fantasy football analysis tool supporting **Sleeper** and **ESPN
 npm install
 ```
 
+## Sunday scoreboard
+
+During Sunday games the tool leads with the live head-to-head instead of
+analysis - both lineups side by side, slot by slot, with what each starter has
+scored so far:
+
+```
+Gorlami                 114.9   143.3  Gorbanzo Beans
+  trailing by 28.4
+
+  SLOT   YOU                           THEM
+  QB     Drake Maye NE             5.8 Joe Burrow CIN           22.6
+  RB     Derrick Henry BAL        21.9 Jahmyr Gibbs DET         41.4
+  ...
+```
+
+It switches on by itself from noon Central on Sunday until the night game is
+over, measured in Central time wherever you run it. `--live` forces it at any
+time and `--no-live` suppresses it.
+
 ## Watching players
 
 Track free agents you are interested in and they are re-valued against your

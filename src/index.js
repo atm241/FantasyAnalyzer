@@ -14,6 +14,7 @@ import { PlayerLookupService } from './services/playerLookup.js';
 import { assessContention } from './services/contention.js';
 import { buildByeOutlook } from './services/byeOutlook.js';
 import { WatchlistService } from './services/watchlist.js';
+import { GamedayService, isGameday } from './services/gameday.js';
 import { DisplayFormatter } from './display/formatter.js';
 import readline from 'readline';
 import { getCurrentSeasonYear } from './data/nflSchedule.js';
@@ -24,7 +25,7 @@ import {
   getWatchlist, watchPlayer, unwatchPlayer, recordWatchValues
 } from './utils/savedLeagues.js';
 
-let api, rosterService, optimizer, waiverAnalyzer, aiSummary, firstToGo, standings, tradeAnalyzer, matchupService, playerLookup, watchlist;
+let api, rosterService, optimizer, waiverAnalyzer, aiSummary, firstToGo, standings, tradeAnalyzer, matchupService, playerLookup, watchlist, gameday;
 const display = new DisplayFormatter();
 
 let promptInterface = null;
@@ -366,6 +367,24 @@ async function runAnalyzer(username, leagueId, actions = {}) {
       return;
     }
 
+    // On Sunday afternoons the scoreboard is what you want, not analysis.
+    // --live forces it, --no-live suppresses it, otherwise it follows kickoff.
+    const wantsLive = actions.live === undefined ? isGameday() : actions.live;
+    if (wantsLive) {
+      const live = await gameday
+        .getLiveMatchup(league.league_id, user.user_id)
+        .catch(() => null);
+
+      if (live) {
+        display.displayLiveMatchup(live);
+        return;
+      }
+      if (actions.live) {
+        display.displayError('No matchup found for this week.');
+        return;
+      }
+    }
+
     // A single-player lookup answers one question, so it skips the full report.
     if (actions.player) {
       await runPlayerLookup(league, user, actions.player);
@@ -520,7 +539,7 @@ async function runAnalyzer(username, leagueId, actions = {}) {
 
     // Show top available by position
     display.displayInfo('Finding best available players...');
-    const topAvailable = await waiverAnalyzer.getTopAvailable(league.league_id, 5, roster);
+    const topAvailable = await waiverAnalyzer.getTopAvailable(league.league_id, 5, roster, user.user_id, contention);
     display.displayWaiverRecommendations(topAvailable, 5);
 
     // Analyze First to Go (droppable/tradeable players)
@@ -588,6 +607,8 @@ program
   .option('--player <name>', 'Look up one player: value, FAAB bid, who to drop')
   .option('--watch <name>', 'Track a player and report on them every run')
   .option('--unwatch <name>', 'Stop tracking a player')
+  .option('--live', 'Show the live scoreboard (automatic during Sunday games)')
+  .option('--no-live', 'Skip the live scoreboard even during games')
   .action(async (options) => {
     console.log('Welcome to Fantasy Analyzer!\n');
 
@@ -698,12 +719,14 @@ program
     matchupService = new MatchupService(api, rosterService, optimizer);
     playerLookup = new PlayerLookupService(api, rosterService, waiverAnalyzer, firstToGo);
     watchlist = new WatchlistService(api, rosterService, waiverAnalyzer);
+    gameday = new GamedayService(api, rosterService);
 
     try {
       await runAnalyzer(options.username, options.league, {
         player: options.player,
         watch: options.watch,
-        unwatch: options.unwatch
+        unwatch: options.unwatch,
+        live: options.live
       });
     } finally {
       closePrompt();

@@ -224,13 +224,20 @@ export class WaiverAnalyzer {
   /**
    * Find best available players at each position
    */
-  async getTopAvailable(leagueId, limit = 10, roster = null) {
+  async getTopAvailable(leagueId, limit = 10, roster = null, userId = null, contention = null) {
     const positions = FANTASY_POSITIONS;
     // Same economics the needs analysis uses, so both rank against your own
     // lineup rather than two different baselines.
     const economics = await this.rosterService.getEconomics(leagueId, roster);
     const trending = await this.api.getTrendingPlayers('add', 24);
     const trendingIds = new Set(trending.map(t => t.player_id));
+
+    // Price every board entry the same way targeted pickups are priced, so the
+    // main list answers "what should I bid" and not only "who is best".
+    const budget = userId && roster ? await this.getWaiverBudget(leagueId, userId) : null;
+    const bidContext = roster
+      ? { ...(await this.buildBidContext(leagueId, roster)), contention }
+      : null;
 
     const recommendations = {};
 
@@ -243,8 +250,19 @@ export class WaiverAnalyzer {
         trending: trendingIds.has(player.playerId)
       }));
 
-      scored.sort(WaiverAnalyzer.byWaiverValue);
-      recommendations[position] = scored.slice(0, limit);
+      const priced = scored.map(player => ({
+        ...player,
+        bid: budget && bidContext
+          ? this.suggestBid(player, economics, budget, bidContext)
+          : null
+      }));
+
+      // Strictly by what each adds, so the bids beside them read in order.
+      priced.sort((a, b) =>
+        ((b.bid?.gain ?? 0) - (a.bid?.gain ?? 0)) || WaiverAnalyzer.byWaiverValue(a, b)
+      );
+
+      recommendations[position] = priced.slice(0, limit);
     }
 
     return recommendations;
