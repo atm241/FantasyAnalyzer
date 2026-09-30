@@ -35,6 +35,13 @@ Gorlami                 114.9   143.3  Gorbanzo Beans
   ...
 ```
 
+Each starter is marked by where their game stands - a final score, a score
+still moving, `--` for a game that has not kicked off, or `BYE` - so a zero is
+never mistaken for a bad afternoon. Alongside the margin it reports how many
+starters each side has left and the projected finish, because trailing by thirty
+with three players to play is a different position from trailing by thirty with
+none.
+
 It switches on by itself from noon Central on Sunday until the night game is
 over, measured in Central time wherever you run it. `--live` forces it at any
 time and `--no-live` suppresses it.

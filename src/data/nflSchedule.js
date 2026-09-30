@@ -62,6 +62,9 @@ class NflSchedule {
     this.teamsOnByeByWeek = new Map();
     this.firstDateByWeek = new Map();
     this.lastDateByWeek = new Map();
+    // Game state per team per week, so a live scoreboard can say who has
+    // finished, who is playing and who has not kicked off yet.
+    this.gamesByWeek = new Map();
     this.degraded = games.length === 0;
 
     const teams = new Set();
@@ -75,6 +78,17 @@ class NflSchedule {
       if (!teamsByWeek.has(game.week)) teamsByWeek.set(game.week, new Set());
       teamsByWeek.get(game.week).add(game.home);
       teamsByWeek.get(game.week).add(game.away);
+
+      if (!this.gamesByWeek.has(game.week)) this.gamesByWeek.set(game.week, new Map());
+      const forWeek = this.gamesByWeek.get(game.week);
+      for (const [team, opponent] of [[game.home, game.away], [game.away, game.home]]) {
+        forWeek.set(team, {
+          status: game.status || null,
+          opponent,
+          date: game.date || null,
+          home: team === game.home
+        });
+      }
 
       if (!game.date) continue;
       const first = this.firstDateByWeek.get(game.week);
@@ -202,6 +216,32 @@ export function getByeWeek(team) {
 export function getTeamsOnBye(week) {
   if (!week || !active) return [];
   return active.teamsOnByeByWeek.get(week) || [];
+}
+
+/**
+ * A team's game for a week: status, opponent and whether they are at home.
+ * Null when the team has no game, which is what a bye looks like.
+ */
+export function getGame(team, week) {
+  if (!team || !week || !active) return null;
+  return active.gamesByWeek.get(week)?.get(team) || null;
+}
+
+/**
+ * Where a team's week stands: 'done', 'playing', 'upcoming' or 'bye'.
+ *
+ * A fantasy score only means something alongside this - trailing by thirty with
+ * three starters still to play is a different position from trailing by thirty
+ * with none.
+ */
+export function getGameState(team, week) {
+  const game = getGame(team, week);
+  if (!game) return 'bye';
+
+  const status = (game.status || '').toLowerCase();
+  if (status === 'complete' || status === 'post_game') return 'done';
+  if (status === 'in_game' || status === 'halftime') return 'playing';
+  return 'upcoming';
 }
 
 /** True when bye data is actually available (vs. the degraded fallback). */

@@ -41,3 +41,41 @@ test('the window is measured in Central time, not the local clock', () => {
   assert.equal(zonedParts(kickoff, 'America/Los_Angeles').hour, 10);
   assert.equal(isGameday(kickoff), true);
 });
+
+// --- game state, which is what makes a live deficit readable ---
+
+import { NflSchedule } from '../src/data/nflSchedule.js';
+
+test('game state is read from the schedule, not guessed', () => {
+  const schedule = new NflSchedule(2026, [
+    { week: 3, home: 'KC', away: 'BUF', date: '2026-09-27', status: 'complete' },
+    { week: 3, home: 'SEA', away: 'DAL', date: '2026-09-27', status: 'in_game' },
+    { week: 4, home: 'KC', away: 'SEA', date: '2026-10-04', status: 'pre_game' }
+  ]);
+
+  assert.equal(schedule.gamesByWeek.get(3).get('KC').status, 'complete');
+  assert.equal(schedule.gamesByWeek.get(3).get('BUF').status, 'complete');
+  assert.equal(schedule.gamesByWeek.get(3).get('SEA').status, 'in_game');
+  assert.equal(schedule.gamesByWeek.get(4).get('KC').status, 'pre_game');
+});
+
+test('both sides of a game are recorded with the right opponent', () => {
+  const schedule = new NflSchedule(2026, [
+    { week: 1, home: 'KC', away: 'BUF', date: '2026-09-10', status: 'pre_game' }
+  ]);
+
+  const home = schedule.gamesByWeek.get(1).get('KC');
+  const away = schedule.gamesByWeek.get(1).get('BUF');
+
+  assert.equal(home.opponent, 'BUF');
+  assert.equal(home.home, true);
+  assert.equal(away.opponent, 'KC');
+  assert.equal(away.home, false);
+});
+
+test('a team with no game that week has no entry, which reads as a bye', () => {
+  const schedule = new NflSchedule(2026, [
+    { week: 6, home: 'KC', away: 'BUF', date: '2026-10-11', status: 'pre_game' }
+  ]);
+  assert.equal(schedule.gamesByWeek.get(6).has('SEA'), false);
+});

@@ -277,6 +277,31 @@ export class DisplayFormatter {
       (leading ? chalk.green(`leading by ${margin}`) : chalk.red(`trailing by ${margin}`))
     );
 
+    // A deficit only means something next to what is left to play.
+    const left = side => {
+      const parts = [];
+      if (side.playing) parts.push(`${side.playing} playing`);
+      parts.push(`${side.yetToPlay} yet to play`);
+      if (side.remainingProjected > 0) {
+        parts.push(`~${side.remainingProjected.toFixed(0)} pts to come`);
+      }
+      return parts.join(', ');
+    };
+    console.log(chalk.gray(`  You: ${left(you)}`));
+    console.log(chalk.gray(`  Them: ${left(opponent)}`));
+
+    // The projected finish, which is what the margin will actually become.
+    const yourFinish = you.total + you.remainingProjected;
+    const theirFinish = opponent.total + opponent.remainingProjected;
+    const projectedMargin = yourFinish - theirFinish;
+    console.log(
+      '  ' + chalk.bold('Projected finish: ') +
+      `${yourFinish.toFixed(1)} - ${theirFinish.toFixed(1)}  ` +
+      (projectedMargin >= 0
+        ? chalk.green(`(+${projectedMargin.toFixed(1)})`)
+        : chalk.red(`(${projectedMargin.toFixed(1)})`))
+    );
+
     console.log('\n' + chalk.gray('  SLOT   ' + 'YOU'.padEnd(width) + 'THEM'));
     console.log(chalk.gray('  ' + '-'.repeat(66)));
 
@@ -302,7 +327,19 @@ export class DisplayFormatter {
 
     const points = (player.points ?? 0).toFixed(1);
     const winning = (player.points ?? 0) > (rival?.points ?? 0);
-    const tinted = winning ? chalk.green(points.padStart(6)) : chalk.gray(points.padStart(6));
+
+    // Dim a score that is final, highlight one still moving, and mark a player
+    // who has not started so a zero is not mistaken for a bad game.
+    let tinted;
+    if (player.state === 'upcoming') {
+      tinted = chalk.yellow('  --  ');
+    } else if (player.state === 'bye') {
+      tinted = chalk.blue('  BYE ');
+    } else if (player.state === 'playing') {
+      tinted = chalk.bold[winning ? 'green' : 'white'](points.padStart(6));
+    } else {
+      tinted = winning ? chalk.green(points.padStart(6)) : chalk.gray(points.padStart(6));
+    }
 
     // Pad on the visible text, since colour codes do not occupy columns.
     const visible = player.empty ? '(empty)' : `${player.name.slice(0, 18)} ${player.team}`;
