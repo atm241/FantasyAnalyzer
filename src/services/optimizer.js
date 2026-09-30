@@ -135,6 +135,15 @@ export class LineupOptimizer {
   /**
    * Compare current lineup to optimal lineup
    */
+  /**
+   * True when there are real projections to reason about. Without them the
+   * estimate fallback cannot tell two players at a position apart, so ranking a
+   * lineup by it would be theatre.
+   */
+  canProject() {
+    return this.rosterService?.hasProjections?.() ?? false;
+  }
+
   async analyzeLineup(leagueId, currentRoster) {
     const formatted = await this.rosterService.formatRoster(currentRoster, leagueId);
     const optimal = await this.optimizeLineup(leagueId, formatted);
@@ -272,6 +281,7 @@ export class LineupOptimizer {
     };
 
     return {
+      projectionsAvailable: this.canProject(),
       lineupPlan,
       currentLineup: formatted.starters,
       optimalLineup: optimal.lineup,

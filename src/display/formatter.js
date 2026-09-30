@@ -68,13 +68,16 @@ export class DisplayFormatter {
           ? chalk.green(`  up ${entry.change}`)
           : chalk.red(`  down ${Math.abs(entry.change)}`);
 
+      // With no projections there is no value to report, so say nothing rather
+      // than print a figure with nothing behind it.
+      const priced = entry.bid?.amount != null;
       const worth = entry.gain == null
-        ? ''
+        ? chalk.gray('  value needs projections')
         : entry.gain > 2
           ? chalk.bold.green(`  +${entry.gain} pts to your lineup`)
           : chalk.gray(`  +${entry.gain} pts - would not start`);
 
-      const bid = entry.bid && entry.gain > 2
+      const bid = priced && entry.gain > 2
         ? chalk.bold(`  bid $${entry.bid.amount}`)
         : '';
 
@@ -132,6 +135,23 @@ export class DisplayFormatter {
     });
 
     console.log(chalk.gray('\n  Plan waiver claims around these before the week arrives.'));
+  }
+
+  /**
+   * Say plainly when a platform cannot supply projections.
+   *
+   * Everything this tool recommends is priced off projected points. Without
+   * them the fallback gives every player at a position an identical score, so
+   * the honest move is to name the limitation rather than fill the gap.
+   */
+  displayNoProjections(platform, supported = false) {
+    console.log('\n' + chalk.bgYellow.black(' PROJECTIONS UNAVAILABLE '));
+    console.log(chalk.yellow(supported
+      ? `  The ${platform.toUpperCase()} projections feed could not be read this run.`
+      : `  ${platform.toUpperCase()} does not publish player projections.`));
+    console.log(chalk.gray('  Real: your roster, records, matchup scores and who is available.'));
+    console.log(chalk.gray('  Not shown: lineup advice, FAAB bids, trade value, rest-of-season.'));
+    console.log(chalk.gray('  Nothing below is estimated and presented as measured.'));
   }
 
   /**
@@ -398,6 +418,16 @@ export class DisplayFormatter {
     console.log(chalk.bold.magenta('LINEUP OPTIMIZATION'));
     console.log(chalk.bold.magenta('='.repeat(70)));
 
+    // Without real projections every player at a position scores the same, so
+    // there is no lineup to optimise and saying otherwise would be misleading.
+    if (analysis.projectionsAvailable === false) {
+      console.log('\n' + chalk.yellow('Lineup optimisation needs player projections.'));
+      console.log(chalk.gray('  This platform does not publish them, so no recommendation is made.'));
+      console.log(chalk.gray('  Your roster and matchup above are real; anything projected is not.'));
+      console.log('\n' + chalk.bold.magenta('='.repeat(70)) + '\n');
+      return;
+    }
+
     const gain = analysis.pointsGain;
     console.log(
       `\nProjected: ${chalk.yellow(analysis.currentPoints.toFixed(1))}` +
@@ -475,11 +505,11 @@ export class DisplayFormatter {
 
           // What to bid, which is the decision this board exists to support.
           const worthIt = player.bid?.gain > 2;
-          const bid = player.bid
-            ? (worthIt
+          const bid = player.bid?.amount == null
+            ? chalk.gray('  n/a')
+            : (worthIt
                 ? chalk.bold.green(`$${player.bid.amount}`.padStart(5))
-                : chalk.gray(`$${player.bid.amount}`.padStart(5)))
-            : chalk.gray('    -');
+                : chalk.gray(`$${player.bid.amount}`.padStart(5)));
           const worth = worthIt ? chalk.gray(` +${player.bid.gain} pts`) : '';
 
           console.log(
@@ -542,9 +572,11 @@ export class DisplayFormatter {
             if (player && player.name) {
               const status = this.getStatusIndicator(player);
               const score = chalk.cyan(`[${player.waiverScore}]`);
-              const bid = player.bid
+              const bid = player.bid?.amount != null
                 ? '  ' + chalk.bold.green(`bid $${player.bid.amount}`) + chalk.gray(` (${player.bid.note})`)
-                : '';
+                : player.bid
+                  ? chalk.gray(`  (${player.bid.note})`)
+                  : '';
               console.log(
                 `${idx + 1}. ${player.name.padEnd(25)} ${(player.team || 'FA').padEnd(4)} ${status} ${score}${bid}`
               );

@@ -1,4 +1,4 @@
-import { POSITION_SCARCITY, getBasePoints } from '../data/scoringConstants.js';
+import { POSITION_SCARCITY } from '../data/scoringConstants.js';
 import { playerQuality } from '../data/playerQuality.js';
 import { realPlayers } from '../utils/playerName.js';
 import { bestLineupValue, weeklyLineupGain } from './lineupValue.js';
@@ -112,6 +112,12 @@ export class TradeAnalyzer {
    */
   async findTradeMatches(yourRoster, leagueId, yourUserId, contention = null) {
     this.contention = contention;
+
+    // Every trade number here is projected points. With no projections the
+    // fallback gives all players at a position the same value, which would
+    // produce confident nonsense, so no trades are proposed at all.
+    this.projectionsAvailable = this.rosterService?.hasProjections?.() ?? false;
+    if (!this.projectionsAvailable) return [];
     // Get all league rosters and users
     const allRosters = await this.rosterService.api.getLeagueRosters(leagueId);
     const allUsers = await this.rosterService.api.getLeagueUsers(leagueId);
@@ -548,12 +554,10 @@ export class TradeAnalyzer {
       return Math.round(projected.restOfSeason + projected.playoff);
     }
 
-    // No projection at all: the feed omits players it does not expect to play.
-    if (this.rosterService?.hasProjections?.()) return 0;
-
-    // Only reached when the projection feed is unavailable entirely.
-    const weeks = weeksRemaining || 8;
-    return Math.round(getBasePoints(player.position) * weeks);
+    // Either the feed omits this player because it does not expect them to
+    // play, or there is no feed at all. Neither is a reason to invent a season
+    // total from position averages.
+    return 0;
   }
 
   /**
@@ -561,6 +565,12 @@ export class TradeAnalyzer {
    */
   formatTradeAnalysis(tradeMatches, yourNeeds) {
     const lines = [];
+
+    if (this.projectionsAvailable === false) {
+      lines.push('\nTrade analysis needs player projections, which this platform');
+      lines.push('does not publish. No proposals are made rather than guessed at.');
+      return lines.join('\n');
+    }
 
     if (this.contention) {
       if (!this.contention.tradesAllowed) {

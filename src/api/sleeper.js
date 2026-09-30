@@ -190,7 +190,19 @@ export class SleeperAPI {
     const byWeek = {};
     for (const { week, stats } of results) byWeek[week] = stats;
 
-    writeCache(cacheKey, byWeek);
+    // Never persist a failed fetch. Caching an empty result would serve zero
+    // projections for the whole cache window, silently flattening every
+    // rest-of-season number, long after the feed recovered.
+    const entries = Object.values(byWeek)
+      .reduce((total, stats) => total + Object.keys(stats || {}).length, 0);
+    const complete = Object.values(byWeek).filter(
+      stats => Object.keys(stats || {}).length > 0
+    ).length;
+
+    if (entries > 0 && complete === weeks.length) {
+      writeCache(cacheKey, byWeek);
+    }
+
     return byWeek;
   }
 

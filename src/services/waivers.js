@@ -2,7 +2,7 @@ import { isPlayerLikelyOut } from '../data/scoringConstants.js';
 import { isEliteOffense } from '../data/teamRankings.js';
 import { realPlayers } from '../utils/playerName.js';
 import { FANTASY_POSITIONS } from './positionValue.js';
-import { weeklyLineupGain } from './lineupValue.js';
+import { weeklyLineupGain, replacementRisk } from './lineupValue.js';
 
 /** Short explanation of why a bid was scaled up or down. */
 function postureNote(contention) {
@@ -88,8 +88,18 @@ export class WaiverAnalyzer {
        * most weeks and a full starter's points in the week yours is off.
        */
       lineupGain(player) {
+        return this.valueOf(player).total;
+      },
+
+      /**
+       * A pickup is worth what it adds to the lineup you field today, plus what
+       * it would recover if a starter ahead of it goes down. Pricing only the
+       * first treats a two-deep position the same as a four-deep one.
+       */
+      valueOf(player) {
         if (cache.has(player.playerId)) return cache.get(player.playerId);
-        const gain = weeklyLineupGain({
+
+        const immediate = weeklyLineupGain({
           roster: myPlayers,
           addition: player,
           dropping,
@@ -97,8 +107,24 @@ export class WaiverAnalyzer {
           weeks: outlook.weeks || [],
           pointsIn
         });
-        cache.set(player.playerId, gain);
-        return gain;
+
+        const cover = replacementRisk({
+          roster: myPlayers,
+          addition: player,
+          rosterPositions,
+          weeks: outlook.weeks || [],
+          pointsIn
+        });
+
+        const value = {
+          immediate,
+          insurance: cover.value,
+          scenarios: cover.scenarios,
+          total: immediate + cover.value
+        };
+
+        cache.set(player.playerId, value);
+        return value;
       }
     };
   }
@@ -113,14 +139,23 @@ export class WaiverAnalyzer {
   suggestBid(player, economics, budget, context = {}) {
     if (!budget || budget.remaining <= 0) return null;
 
+    // A bid is priced on projected value. With no projections there is nothing
+    // to price, and a dollar figure would be invented.
+    if (this.rosterService?.hasProjections && !this.rosterService.hasProjections()) {
+      return { amount: null, gain: null, note: 'no projections on this platform' };
+    }
+
     const economy = economics?.[player.position];
     if (!economy || economy.idealCount === 0) {
       return { amount: 0, note: 'not startable in this league' };
     }
 
-    // What a pickup is worth is what it adds to the lineup you can field, after
-    // the drop a full roster forces - not the player's raw projection.
-    const gain = context.lineupGain ? Math.round(context.lineupGain(player)) : 0;
+    // What a pickup is worth: what it adds to the lineup you field now, plus
+    // what it recovers if a starter ahead of it misses time.
+    const value = context.valueOf ? context.valueOf(player) : null;
+    const gain = value ? Math.round(value.total) : 0;
+    const immediate = value ? Math.round(value.immediate) : 0;
+    const insurance = value ? Math.round(value.insurance) : 0;
 
     if (gain <= 2) {
       return {
@@ -141,11 +176,20 @@ export class WaiverAnalyzer {
     const posture = context.contention?.faabMultiplier ?? 1;
     const amount = Math.max(1, Math.round(budget.remaining * share * posture));
 
-    const note = `+${gain} pts to your starting lineup rest-of-season`;
+    // Say which part of the value is cover, since that changes how it reads.
+    const basis = insurance > 2 && immediate <= 2
+      ? `+${insurance} pts of cover if a ${player.position} ahead of them goes down`
+      : insurance > 2
+        ? `+${immediate} pts now, +${insurance} more as cover`
+        : `+${gain} pts to your starting lineup rest-of-season`;
+
     return {
       amount: Math.min(amount, budget.remaining),
       gain,
-      note: posture === 1 ? note : `${note}, ${postureNote(context.contention)}`
+      immediate,
+      insurance,
+      scenarios: value?.scenarios || [],
+      note: posture === 1 ? basis : `${basis}, ${postureNote(context.contention)}`
     };
   }
 

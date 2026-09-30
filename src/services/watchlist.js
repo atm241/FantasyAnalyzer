@@ -62,8 +62,12 @@ export class WatchlistService {
       };
 
       const available = !ownerRoster;
-      const gain = available ? Math.round(context.lineupGain(candidate)) : null;
-      const bid = available && budget
+      // Value is projection-derived; without projections there is none to give.
+      const canPrice = this.rosterService?.hasProjections?.() ?? false;
+      const gain = available && canPrice
+        ? Math.round(context.lineupGain(candidate))
+        : null;
+      const bid = available && budget && canPrice
         ? this.waiverAnalyzer.suggestBid(candidate, economics, budget, context)
         : null;
 

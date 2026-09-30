@@ -488,6 +488,13 @@ async function runAnalyzer(username, leagueId, actions = {}) {
       .catch(() => null);
     display.displayMatchup(matchup);
 
+    // Say up front when the platform cannot supply projections, so nothing
+    // that follows is mistaken for a measured number.
+    const projectionsAvailable = rosterService.hasProjections();
+    if (!projectionsAvailable) {
+      display.displayNoProjections(api.platform, api.supportsProjections());
+    }
+
     display.displayContention(contention);
 
     // Display current roster

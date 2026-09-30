@@ -248,6 +248,17 @@ export class PlatformAdapter {
     return { stats: {}, players: {} };
   }
 
+  /**
+   * Whether this platform can supply real player projections.
+   *
+   * ESPN has no public projections feed, and without one the estimate fallback
+   * gives every player at a position the same score - which is not a projection
+   * and must not be presented as one.
+   */
+  supportsProjections() {
+    return this.platform === 'sleeper';
+  }
+
   /** Projections for a span of weeks, for rest-of-season value. */
   async getProjectionRange(season, fromWeek, toWeek) {
     if (this.platform === 'sleeper') {

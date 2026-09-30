@@ -133,6 +133,24 @@ players appearing to outweigh one stud, a position the league never starts being
 treated as a priority, and a highly ranked player buried on his depth chart
 being valued as a starter.
 
+## When projections are unavailable
+
+Every recommendation here is priced off projected points. ESPN publishes no
+projections feed, and without one the estimate fallback gives every player at a
+position an identical score - so the tool says so rather than filling the gap:
+
+```
+ PROJECTIONS UNAVAILABLE
+  ESPN does not publish player projections.
+  Real: your roster, records, matchup scores and who is available.
+  Not shown: lineup advice, FAAB bids, trade value, rest-of-season.
+```
+
+Lineup advice, FAAB bids, trade proposals and rest-of-season value are withheld
+rather than guessed at. Rosters, records, live scores and free-agent lists are
+unaffected. A feed that simply could not be read this run is reported
+differently from a platform that has none.
+
 ## Keeping season data current
 
 Everything season-specific is derived at runtime, so the tool rolls into a new
