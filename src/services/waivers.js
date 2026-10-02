@@ -161,6 +161,9 @@ export class WaiverAnalyzer {
       return {
         amount: Math.min(1, budget.remaining),
         gain,
+        immediate,
+        insurance,
+        scenarios: value?.scenarios || [],
         note: economy.streamable
           ? 'minimum bid - streamable position'
           : 'minimum bid - would not crack your lineup'

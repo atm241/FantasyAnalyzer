@@ -68,6 +68,21 @@ WATCHING
 Each run records what a player was worth, so the next one shows whether they are
 rising or fading. Lists are kept per league in `config.json`.
 
+## How a bid is priced
+
+Two parts, both in projected points:
+
+- **Now** - what the player adds to the lineup you can field this week and every
+  remaining week, after the drop a full roster forces.
+- **Cover** - what they would recover if a starter ahead of them missed time,
+  weighted by the chance of that happening.
+
+The second part matters more than it sounds. A pickup who never cracks your
+lineup looks worthless right up to the week the player ahead of them is ruled
+out, and a position two deep is nothing like a position four deep. Cover
+self-regulates: where depth already exists the recovery is near zero, because
+the existing backup fills the slot instead.
+
 ## Bye weeks
 
 Byes are projected forward across the whole season, not just checked for the

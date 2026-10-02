@@ -182,7 +182,8 @@ export function replacementRisk({ roster, addition, rosterPositions, weeks, poin
     // You cannot recover more than the absence cost; anything beyond that is
     // an upgrade, which the immediate-gain term already counts.
     const recovered = Math.min(valueOver(without.concat(addition)) - withoutValue, lost);
-    if (recovered <= 0) continue;
+    // Fractions of a point are not cover worth reporting.
+    if (recovered < 1) continue;
 
     scenarios.push({
       absent: starter.name,
