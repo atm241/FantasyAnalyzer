@@ -79,3 +79,85 @@ test('a team with no game that week has no entry, which reads as a bye', () => {
   ]);
   assert.equal(schedule.gamesByWeek.get(6).has('SEA'), false);
 });
+
+// --- which numbers are the truth, and when ---
+
+test('a week with every game played is final and the score leads', async () => {
+  const { GamedayService } = await import('../src/services/gameday.js');
+  const service = buildService({ allStates: 'done', yourPoints: 95, theirPoints: 135 });
+  const matchup = await service.getLiveMatchup('L', 'me');
+
+  assert.equal(matchup.state, 'final');
+  assert.equal(matchup.you.total, 95);
+  assert.equal(matchup.opponent.total, 135);
+  // A settled loss is a loss, not a 33% chance.
+  assert.equal(matchup.winProbability, 0);
+  assert.equal(matchup.you.yetToPlay, 0);
+});
+
+test('a week part played is live, and the score still leads', async () => {
+  const service = buildService({ allStates: 'mixed', yourPoints: 95, theirPoints: 135 });
+  const matchup = await service.getLiveMatchup('L', 'me');
+
+  assert.equal(matchup.state, 'live');
+  assert.equal(matchup.you.total, 95, 'actual points, not a projection');
+  assert.ok(matchup.you.yetToPlay > 0);
+});
+
+test('before kickoff there is no score, so it is projected', async () => {
+  const service = buildService({ allStates: 'upcoming', yourPoints: 0, theirPoints: 0 });
+  const matchup = await service.getLiveMatchup('L', 'me');
+
+  assert.equal(matchup.state, 'upcoming');
+  assert.equal(matchup.you.yetToPlay, 2);
+});
+
+/**
+ * A service wired to fixtures: two starters a side, with game states driven by
+ * a schedule built for the purpose.
+ */
+function buildService({ allStates, yourPoints, theirPoints }) {
+  const { GamedayService } = gamedayModule;
+  const statusFor = index => {
+    if (allStates === 'done') return 'complete';
+    if (allStates === 'upcoming') return 'pre_game';
+    return index === 0 ? 'complete' : 'pre_game';
+  };
+
+  scheduleModule.loadScheduleFromGames(2026, [
+    { week: 1, home: 'KC', away: 'BUF', date: '2026-09-10', status: statusFor(0) },
+    { week: 1, home: 'SEA', away: 'DAL', date: '2026-09-10', status: statusFor(1) }
+  ]);
+
+  const api = {
+    getMatchups: async () => ([
+      { roster_id: 1, matchup_id: 9, points: yourPoints, starters: ['a', 'b'], starters_points: [50, 45] },
+      { roster_id: 2, matchup_id: 9, points: theirPoints, starters: ['c', 'd'], starters_points: [70, 65] }
+    ]),
+    getLeagueRosters: async () => ([
+      { roster_id: 1, owner_id: 'me' }, { roster_id: 2, owner_id: 'them' }
+    ]),
+    getLeagueUsers: async () => ([
+      { user_id: 'me', display_name: 'You' }, { user_id: 'them', display_name: 'Them' }
+    ]),
+    getLeague: async () => ({ roster_positions: ['QB', 'RB', 'BN'] })
+  };
+
+  const rosterService = {
+    getCurrentWeek: async () => 1,
+    getNFLState: async () => ({ season: 2026, week: 1 }),
+    loadProjections: async () => ({}),
+    loadPlayers: async () => ({
+      a: { full_name: 'A', position: 'QB', team: 'KC' },
+      b: { full_name: 'B', position: 'RB', team: 'SEA' },
+      c: { full_name: 'C', position: 'QB', team: 'BUF' },
+      d: { full_name: 'D', position: 'RB', team: 'DAL' }
+    }),
+    projections: {}
+  };
+
+  return new GamedayService(api, rosterService);
+}
+
+const gamedayModule = await import('../src/services/gameday.js');
+const scheduleModule = await import('../src/data/nflSchedule.js');

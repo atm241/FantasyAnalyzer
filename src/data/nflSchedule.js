@@ -219,6 +219,19 @@ export function getTeamsOnBye(week) {
 }
 
 /**
+ * Load a schedule from games already in hand, bypassing the network.
+ *
+ * Used by tests so game states can be set deliberately rather than depending
+ * on what the live feed happens to say this week.
+ */
+export function loadScheduleFromGames(season, games) {
+  const schedule = new NflSchedule(Number(season), games);
+  cache.set(Number(season), schedule);
+  active = schedule;
+  return schedule;
+}
+
+/**
  * A team's game for a week: status, opponent and whether they are at home.
  * Null when the team has no game, which is what a bye looks like.
  */

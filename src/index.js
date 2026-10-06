@@ -9,7 +9,6 @@ import { AISummaryService } from './services/aiSummary.js';
 import { FirstToGoAnalyzer } from './services/firstToGo.js';
 import { StandingsAnalyzer } from './services/standings.js';
 import { TradeAnalyzer } from './services/tradeAnalyzer.js';
-import { MatchupService } from './services/matchup.js';
 import { PlayerLookupService } from './services/playerLookup.js';
 import { assessContention } from './services/contention.js';
 import { buildByeOutlook } from './services/byeOutlook.js';
@@ -25,7 +24,7 @@ import {
   getWatchlist, watchPlayer, unwatchPlayer, recordWatchValues
 } from './utils/savedLeagues.js';
 
-let api, rosterService, optimizer, waiverAnalyzer, aiSummary, firstToGo, standings, tradeAnalyzer, matchupService, playerLookup, watchlist, gameday;
+let api, rosterService, optimizer, waiverAnalyzer, aiSummary, firstToGo, standings, tradeAnalyzer, playerLookup, watchlist, gameday;
 const display = new DisplayFormatter();
 
 let promptInterface = null;
@@ -483,8 +482,8 @@ async function runAnalyzer(username, leagueId, actions = {}) {
     }
 
     // This week's head-to-head, before the roster detail
-    const matchup = await matchupService
-      .getCurrentMatchup(league.league_id, user.user_id)
+    const matchup = await gameday
+      .getLiveMatchup(league.league_id, user.user_id)
       .catch(() => null);
     display.displayMatchup(matchup);
 
@@ -723,7 +722,6 @@ program
     firstToGo = new FirstToGoAnalyzer(rosterService);
     standings = new StandingsAnalyzer(api, rosterService);
     tradeAnalyzer = new TradeAnalyzer(rosterService);
-    matchupService = new MatchupService(api, rosterService, optimizer);
     playerLookup = new PlayerLookupService(api, rosterService, waiverAnalyzer, firstToGo);
     watchlist = new WatchlistService(api, rosterService, waiverAnalyzer);
     gameday = new GamedayService(api, rosterService);

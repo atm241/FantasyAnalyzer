@@ -44,6 +44,19 @@ export function zonedParts(now, zone = 'America/Chicago') {
   };
 }
 
+/**
+ * Win probability from a projected margin.
+ *
+ * Weekly fantasy scores vary a lot - a standard deviation of roughly 25 points
+ * on a team total is typical - so a margin is read against that spread rather
+ * than treated as decisive.
+ */
+export function winProbability(yourPoints, theirPoints, spread = 25) {
+  const z = (yourPoints - theirPoints) / spread;
+  // Logistic approximation of the normal CDF: close enough, dependency free.
+  return 1 / (1 + Math.exp(-1.702 * z));
+}
+
 export class GamedayService {
   constructor(api, rosterService) {
     this.api = api;
@@ -132,12 +145,38 @@ export class GamedayService {
       };
     };
 
+    const you = side(mine);
+    const opponent = side(theirs);
+
+    // Where the week stands decides which numbers are the truth. Once games
+    // have been played the score is a fact; projections are only an estimate of
+    // what has not happened yet.
+    const starters = [...you.starters, ...opponent.starters];
+    const played = starters.filter(p => p.state === 'done').length;
+    const live = starters.some(p => p.state === 'playing');
+    const pending = starters.filter(p => p.state === 'upcoming').length;
+
+    const state = live || (played > 0 && pending > 0)
+      ? 'live'
+      : played > 0
+        ? 'final'
+        : 'upcoming';
+
+    // What the margin will be: the score so far plus what is still to come.
+    const yourFinish = you.total + you.remainingProjected;
+    const theirFinish = opponent.total + opponent.remainingProjected;
+
     return {
       week,
       slots,
-      you: side(mine),
-      opponent: side(theirs),
-      margin: (mine.points || 0) - (theirs.points || 0)
+      state,
+      you,
+      opponent,
+      margin: (mine.points || 0) - (theirs.points || 0),
+      projectedFinish: { you: yourFinish, opponent: theirFinish },
+      winProbability: state === 'final'
+        ? (you.total > opponent.total ? 1 : 0)
+        : winProbability(yourFinish, theirFinish)
     };
   }
 }

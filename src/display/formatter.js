@@ -273,68 +273,7 @@ export class DisplayFormatter {
    * The live Sunday scoreboard: both lineups side by side, slot by slot.
    */
   displayLiveMatchup(live) {
-    if (!live) return;
-
-    const { you, opponent } = live;
-    const width = 30;
-
-    console.log('\n' + chalk.bold.cyan('='.repeat(70)));
-    console.log(chalk.bold.cyan(`WEEK ${live.week} - LIVE`));
-    console.log(chalk.bold.cyan('='.repeat(70)));
-
-    const leading = live.margin >= 0;
-    console.log(
-      '\n' + (leading ? chalk.bold.green : chalk.bold)(you.teamName.slice(0, width - 8).padEnd(width - 8)) +
-      (leading ? chalk.bold.green : chalk.bold)(you.total.toFixed(1).padStart(7)) +
-      '   ' +
-      (leading ? chalk.bold : chalk.bold.red)(opponent.total.toFixed(1).padEnd(7)) +
-      (leading ? chalk.bold : chalk.bold.red)(opponent.teamName.slice(0, width - 8))
-    );
-
-    const margin = Math.abs(live.margin).toFixed(1);
-    console.log(
-      chalk.gray('  ') +
-      (leading ? chalk.green(`leading by ${margin}`) : chalk.red(`trailing by ${margin}`))
-    );
-
-    // A deficit only means something next to what is left to play.
-    const left = side => {
-      const parts = [];
-      if (side.playing) parts.push(`${side.playing} playing`);
-      parts.push(`${side.yetToPlay} yet to play`);
-      if (side.remainingProjected > 0) {
-        parts.push(`~${side.remainingProjected.toFixed(0)} pts to come`);
-      }
-      return parts.join(', ');
-    };
-    console.log(chalk.gray(`  You: ${left(you)}`));
-    console.log(chalk.gray(`  Them: ${left(opponent)}`));
-
-    // The projected finish, which is what the margin will actually become.
-    const yourFinish = you.total + you.remainingProjected;
-    const theirFinish = opponent.total + opponent.remainingProjected;
-    const projectedMargin = yourFinish - theirFinish;
-    console.log(
-      '  ' + chalk.bold('Projected finish: ') +
-      `${yourFinish.toFixed(1)} - ${theirFinish.toFixed(1)}  ` +
-      (projectedMargin >= 0
-        ? chalk.green(`(+${projectedMargin.toFixed(1)})`)
-        : chalk.red(`(${projectedMargin.toFixed(1)})`))
-    );
-
-    console.log('\n' + chalk.gray('  SLOT   ' + 'YOU'.padEnd(width) + 'THEM'));
-    console.log(chalk.gray('  ' + '-'.repeat(66)));
-
-    you.starters.forEach((mine, index) => {
-      const theirs = opponent.starters[index];
-      console.log(
-        '  ' + chalk.bold(mine.slot.padEnd(6)) + ' ' +
-        this.livePlayer(mine, theirs, width) + ' ' +
-        this.livePlayer(theirs, mine, width)
-      );
-    });
-
-    console.log('\n' + chalk.bold.cyan('='.repeat(70)) + '\n');
+    return this.displayMatchup(live);
   }
 
   /** One side of a live slot: name, team and points, tinted by who is winning it. */
@@ -368,44 +307,85 @@ export class DisplayFormatter {
   }
 
   /**
-   * Display this week's head-to-head matchup
+   * The head-to-head, framed by where the week actually stands.
+   *
+   * Once games have been played the score is a fact and must lead. Showing a
+   * projected margin above a contradicting "points so far" line reported a
+   * comfortable win while the real result was a heavy loss.
    */
   displayMatchup(matchup) {
     if (!matchup) return;
 
-    const { you, opponent, week } = matchup;
+    const { you, opponent, state } = matchup;
+    const width = 30;
+
+    const label = state === 'final' ? 'FINAL' : state === 'live' ? 'LIVE' : 'PROJECTED';
     console.log('\n' + chalk.bold.cyan('='.repeat(70)));
-    console.log(chalk.bold.cyan(`WEEK ${week} MATCHUP`));
+    console.log(chalk.bold.cyan(`WEEK ${matchup.week} MATCHUP - ${label}`));
     console.log(chalk.bold.cyan('='.repeat(70)));
 
-    const chance = Math.round(matchup.winProbability * 100);
-    const tint = chance >= 60 ? chalk.green : chance >= 40 ? chalk.yellow : chalk.red;
+    // Before kickoff there is no score, so projections are all there is.
+    const yourScore = state === 'upcoming' ? matchup.projectedFinish.you : you.total;
+    const theirScore = state === 'upcoming' ? matchup.projectedFinish.opponent : opponent.total;
+    const ahead = yourScore >= theirScore;
 
     console.log(
-      `\n${chalk.bold(you.teamName)} (${you.record})  ` +
-      `${chalk.bold.green(you.projected.toFixed(1))}` +
-      `  vs  ${chalk.bold.red(opponent.projected.toFixed(1))}  ` +
-      `${chalk.bold(opponent.teamName)} (${opponent.record})`
+      '\n' + (ahead ? chalk.bold.green : chalk.bold)(you.teamName.slice(0, width - 8).padEnd(width - 8)) +
+      (ahead ? chalk.bold.green : chalk.bold.red)(yourScore.toFixed(1).padStart(7)) +
+      '   ' +
+      (ahead ? chalk.bold : chalk.bold.green)(theirScore.toFixed(1).padEnd(7)) +
+      chalk.bold(opponent.teamName.slice(0, width - 8))
     );
 
-    const margin = matchup.margin;
-    console.log(
-      `\nProjected margin: ${margin >= 0 ? chalk.green('+' + margin.toFixed(1)) : chalk.red(margin.toFixed(1))}` +
-      `   Win probability: ${tint.bold(chance + '%')}`
-    );
-
-    if (you.actual || opponent.actual) {
-      console.log(chalk.gray(`Points so far: ${you.actual.toFixed(1)} - ${opponent.actual.toFixed(1)}`));
+    const margin = Math.abs(yourScore - theirScore).toFixed(1);
+    if (state === 'final') {
+      console.log('  ' + (ahead
+        ? chalk.bold.green(`Won by ${margin}`)
+        : chalk.bold.red(`Lost by ${margin}`)));
+    } else {
+      console.log('  ' + (ahead
+        ? chalk.green(`${state === 'live' ? 'leading' : 'favoured'} by ${margin}`)
+        : chalk.red(`${state === 'live' ? 'trailing' : 'underdog'} by ${margin}`)));
     }
 
-    console.log('\n' + chalk.gray('  Your best       ') + chalk.gray('Their best'));
-    for (let i = 0; i < 3; i++) {
-      const a = you.topPlayers[i];
-      const b = opponent.topPlayers[i];
-      const left = a ? `${a.name} ${a.projection.toFixed(1)}` : '';
-      const right = b ? `${b.name} ${b.projection.toFixed(1)}` : '';
-      console.log(`  ${left.padEnd(28)}${right}`);
+    // What is left to play, which is what makes a deficit readable.
+    if (state !== 'final') {
+      const left = side => {
+        const parts = [];
+        if (side.playing) parts.push(`${side.playing} playing`);
+        parts.push(`${side.yetToPlay} yet to play`);
+        if (side.remainingProjected > 0) {
+          parts.push(`~${side.remainingProjected.toFixed(0)} pts to come`);
+        }
+        return parts.join(', ');
+      };
+      console.log(chalk.gray(`  You: ${left(you)}`));
+      console.log(chalk.gray(`  Them: ${left(opponent)}`));
+
+      const projected = matchup.projectedFinish;
+      const diff = projected.you - projected.opponent;
+      console.log(
+        '  ' + chalk.bold('Projected finish: ') +
+        `${projected.you.toFixed(1)} - ${projected.opponent.toFixed(1)}  ` +
+        (diff >= 0 ? chalk.green(`(+${diff.toFixed(1)})`) : chalk.red(`(${diff.toFixed(1)})`))
+      );
+
+      const chance = Math.round(matchup.winProbability * 100);
+      const tint = chance >= 60 ? chalk.green : chance >= 40 ? chalk.yellow : chalk.red;
+      console.log('  ' + chalk.bold('Win probability: ') + tint.bold(`${chance}%`));
     }
+
+    console.log('\n' + chalk.gray('  SLOT   ' + 'YOU'.padEnd(width) + 'THEM'));
+    console.log(chalk.gray('  ' + '-'.repeat(66)));
+
+    you.starters.forEach((mine, index) => {
+      const theirs = opponent.starters[index];
+      console.log(
+        '  ' + chalk.bold(mine.slot.padEnd(6)) + ' ' +
+        this.livePlayer(mine, theirs, width) + ' ' +
+        this.livePlayer(theirs, mine, width)
+      );
+    });
 
     console.log('\n' + chalk.bold.cyan('='.repeat(70)) + '\n');
   }
