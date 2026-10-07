@@ -63,10 +63,16 @@ export class WatchlistService {
 
       const available = !ownerRoster;
       // Value is projection-derived; without projections there is none to give.
+      // Record why it is missing, so a rostered player is not reported as a
+      // projections problem.
       const canPrice = this.rosterService?.hasProjections?.() ?? false;
-      const gain = available && canPrice
-        ? Math.round(context.lineupGain(candidate))
-        : null;
+      const unavailableReason = !available
+        ? 'rostered'
+        : !canPrice
+          ? 'no-projections'
+          : null;
+
+      const gain = unavailableReason ? null : Math.round(context.lineupGain(candidate));
       const bid = available && budget && canPrice
         ? this.waiverAnalyzer.suggestBid(candidate, economics, budget, context)
         : null;
@@ -80,6 +86,7 @@ export class WatchlistService {
           ? 'you'
           : ownerUser?.metadata?.team_name || ownerUser?.display_name || null,
         gain,
+        unavailableReason,
         bid,
         // Movement since the last run, which is the point of watching.
         change: gain != null && item.lastGain != null ? gain - item.lastGain : null

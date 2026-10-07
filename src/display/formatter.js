@@ -71,8 +71,12 @@ export class DisplayFormatter {
       // With no projections there is no value to report, so say nothing rather
       // than print a figure with nothing behind it.
       const priced = entry.bid?.amount != null;
+      // A rostered player has no claim value by definition; only say that
+      // projections are missing when they actually are.
       const worth = entry.gain == null
-        ? chalk.gray('  value needs projections')
+        ? (entry.unavailableReason === 'no-projections'
+            ? chalk.gray('  value needs projections')
+            : '')
         : entry.gain > 2
           ? chalk.bold.green(`  +${entry.gain} pts to your lineup`)
           : chalk.gray(`  +${entry.gain} pts - would not start`);
