@@ -127,13 +127,16 @@ export class DisplayFormatter {
         .join('  |  ');
       console.log(chalk.gray(`  Out - ${summary}`));
 
-      // Losing every player at a position you must start is the real problem.
-      const wipedOut = Object.keys(byPosition).filter(position =>
-        ['QB', 'TE', 'DEF', 'K'].includes(position)
-      );
+      // Only a position where every player is out is actually a hole. Listing
+      // any position with someone on bye claimed you had no tight end while two
+      // of the three were playing.
+      const wipedOut = Object.entries(byeOutlook.uncovered || {})
+        .filter(([, weeks]) => weeks.includes(week.week))
+        .map(([position]) => position);
+
       if (wipedOut.length) {
         console.log(
-          chalk.red(`  You may have no ${wipedOut.join('/')} to start that week.`)
+          chalk.red(`  You have no ${wipedOut.join('/')} to start that week.`)
         );
       }
     });
