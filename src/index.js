@@ -14,8 +14,11 @@ import { assessContention } from './services/contention.js';
 import { buildByeOutlook } from './services/byeOutlook.js';
 import { WatchlistService } from './services/watchlist.js';
 import { GamedayService, isGameday } from './services/gameday.js';
+import { AnalysisContext } from './display/analysisContext.js';
+import { runMenu } from './display/menu.js';
 import { DisplayFormatter } from './display/formatter.js';
 import readline from 'readline';
+import chalk from 'chalk';
 import { getCurrentSeasonYear } from './data/nflSchedule.js';
 import { getRankingsSeason } from './data/teamRankings.js';
 import { getPlayerName } from './utils/playerName.js';
@@ -178,6 +181,23 @@ async function contentionFor(league, user) {
     playoffStart: league.settings?.playoff_week_start || 15,
     tradeDeadline: league.settings?.trade_deadline || null
   });
+}
+
+/** One line of orientation above the menu: who you are and where you stand. */
+function menuHeader({ league, user, standing, contention }) {
+  const team = standing?.userRecord?.teamName ||
+    user.metadata?.team_name || user.display_name;
+  const record = standing?.userRecord
+    ? `${standing.userRecord.wins}-${standing.userRecord.losses}`
+    : '';
+  const place = standing?.userRecord?.standing
+    ? `${standing.userRecord.standing} of ${standing.leagueSize}`
+    : '';
+  const week = standing?.currentWeek ? `Week ${standing.currentWeek}` : '';
+
+  const left = [team, record, place].filter(Boolean).join('  ');
+  const right = [week, contention?.stage].filter(Boolean).join('  ');
+  return `${league.name} - ${left}${right ? '   |   ' + right : ''}`;
 }
 
 /** Add or remove a tracked player, resolving the name the same way --player does. */
@@ -462,37 +482,62 @@ async function runAnalyzer(username, leagueId, actions = {}) {
       }
     }
 
-    // Analyze league standings and playoff probability
-    display.displayInfo('Calculating standings and playoff probability...');
-    const standingsAnalysis = await standings.analyzeStandings(user.user_id, league.league_id);
-
     // Where this team sits in its competitive window. Everything downstream -
     // how much budget to spend, whether to buy or sell, what to hold - depends
     // on whether the season is still live.
     const contention = await contentionFor(league, user);
-    console.log('\n' + '='.repeat(70));
-    console.log(standings.formatStandings(standingsAnalysis));
-    console.log('='.repeat(70) + '\n');
 
-    // Get user's roster
     const roster = await rosterService.getUserRoster(user.user_id, league.league_id);
     if (!roster) {
       display.displayError('Could not find your roster in this league.');
       return;
     }
 
+    if (!rosterService.hasProjections()) {
+      display.displayNoProjections(api.platform, api.supportsProjections());
+    }
+
+    // Unless the whole report was asked for, drive the menu: each screen is
+    // computed when opened rather than all of it on every run.
+    if (!actions.all) {
+      const standing = await standings
+        .analyzeStandings(user.user_id, league.league_id)
+        .catch(() => null);
+
+      const outcome = await runMenu({
+        context: new AnalysisContext({
+          services: {
+            rosterService, optimizer, waiverAnalyzer, firstToGo, standings,
+            tradeAnalyzer, gameday, watchlist, aiSummary, buildByeOutlook
+          },
+          league, user, roster, contention
+        }),
+        display,
+        services: {
+          tradeAnalyzer, firstToGo, standings, aiSummary
+        },
+        prompt,
+        header: menuHeader({ league, user, standing, contention })
+      });
+
+      if (outcome === 'switch-league') {
+        console.log(chalk.gray('\nRe-run to pick a different league.'));
+      }
+      return;
+    }
+
+    // Analyze league standings and playoff probability
+    display.displayInfo('Calculating standings and playoff probability...');
+    const standingsAnalysis = await standings.analyzeStandings(user.user_id, league.league_id);
+    console.log('\n' + '='.repeat(70));
+    console.log(standings.formatStandings(standingsAnalysis));
+    console.log('='.repeat(70) + '\n');
+
     // This week's head-to-head, before the roster detail
     const matchup = await gameday
       .getLiveMatchup(league.league_id, user.user_id)
       .catch(() => null);
     display.displayMatchup(matchup);
-
-    // Say up front when the platform cannot supply projections, so nothing
-    // that follows is mistaken for a measured number.
-    const projectionsAvailable = rosterService.hasProjections();
-    if (!projectionsAvailable) {
-      display.displayNoProjections(api.platform, api.supportsProjections());
-    }
 
     display.displayContention(contention);
 
@@ -613,6 +658,7 @@ program
   .option('--player <name>', 'Look up one player: value, FAAB bid, who to drop')
   .option('--watch <name>', 'Track a player and report on them every run')
   .option('--unwatch <name>', 'Stop tracking a player')
+  .option('--all', 'Print the whole report at once instead of the menu')
   .option('--live', 'Show the live scoreboard (automatic during Sunday games)')
   .option('--no-live', 'Skip the live scoreboard even during games')
   .action(async (options) => {
@@ -731,7 +777,8 @@ program
         player: options.player,
         watch: options.watch,
         unwatch: options.unwatch,
-        live: options.live
+        live: options.live,
+        all: options.all
       });
     } finally {
       closePrompt();

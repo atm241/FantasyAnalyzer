@@ -205,12 +205,39 @@ missing, incomplete, or more than a season out of date.
 
 ## Usage
 
-Run it with no arguments and it asks which platform your league is on, then
-walks you through the rest:
+Run it with no arguments and it opens a menu, with a one-line read on every
+screen and the detail loaded only when you open one:
 
 ```bash
 npm start
 ```
+
+```
+Chill League - Gorlami  2-2  4 of 12   |   Week 5  contending
+======================================================================
+
+   1. Matchup             141.3 - 115.8  85% upcoming
+   2. Lineup              optimal
+   3. Waivers & FAAB      2 position(s) worth upgrading  $76 left
+   4. Trades              5 partner(s), best +74 pts
+   5. Drops               Jaylen Wright (RB)
+   6. Bye weeks           week 11 is -34%
+   7. Watchlist           3 tracked
+   8. Standings & odds    4 of 12  77% playoff odds
+   9. Roster              16 players
+  10. Strategic summary   weekly read and priorities
+
+   r. refresh    l. switch league    q. quit
+```
+
+Enter a number to open a screen, blank to go back, `r` to re-read everything and
+`q` to quit. `--all` prints the whole report in one go instead.
+
+Loading a screen on demand matters: scoring the entire waiver wire takes most of
+a second, and it used to run whether or not you looked at it.
+
+On a first run it asks which platform your league is on, then walks you through
+the rest:
 
 ```
 Which platform is your league on?
