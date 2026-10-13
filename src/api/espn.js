@@ -4,6 +4,23 @@ import { loadSchedule, getCurrentSeasonYear } from '../data/nflSchedule.js';
 const ESPN_BASE_URL = 'https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons';
 
 /**
+ * ESPN expects repeated `view=` parameters, not the `view[]=` form axios
+ * produces by default. With brackets the API quietly returns a 1.6 KB stub
+ * instead of the 2 MB league payload: no team names, no rosters, no scores.
+ * Every ESPN request needs this.
+ */
+function repeatParams(params) {
+  const parts = [];
+  for (const [key, value] of Object.entries(params || {})) {
+    if (value === undefined || value === null) continue;
+    for (const item of Array.isArray(value) ? value : [value]) {
+      parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(item)}`);
+    }
+  }
+  return parts.join('&');
+}
+
+/**
  * ESPN Fantasy Football API Client
  */
 /**
@@ -43,7 +60,8 @@ export class EspnAPI {
     const config = {
       params: {
         view: ['mSettings', 'mTeam', 'mRoster', 'mMatchup', 'mStandings']
-      }
+      },
+      paramsSerializer: repeatParams
     };
 
     // Add cookies for private leagues
@@ -72,7 +90,8 @@ export class EspnAPI {
       params: {
         view: ['mMatchup', 'mMatchupScore'],
         scoringPeriodId: week
-      }
+      },
+      paramsSerializer: repeatParams
     };
 
     if (cookies.espn_s2 && cookies.SWID) {
@@ -155,6 +174,8 @@ export class EspnAPI {
     const positions = [];
 
     // ESPN slot IDs to position names
+    // 'BN' matches what the rest of the tool filters on; 'BENCH' would have
+    // been counted as a starting slot, inflating every lineup by seven players.
     const slotMap = {
       0: 'QB',
       2: 'RB',
@@ -163,7 +184,8 @@ export class EspnAPI {
       16: 'DEF',
       17: 'K',
       23: 'FLEX',
-      20: 'BENCH'
+      20: 'BN',
+      21: 'IR'
     };
 
     for (const [slotId, count] of Object.entries(rosterSettings)) {
