@@ -9,6 +9,37 @@ const ESPN_BASE_URL = 'https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/s
  * instead of the 2 MB league payload: no team names, no rosters, no scores.
  * Every ESPN request needs this.
  */
+/**
+ * ESPN lineup slot ids, in the order a lineup is conventionally listed.
+ *
+ * The order matters: the rest of the tool pairs the starters array with the
+ * league's slots by index, so both have to agree. Reading them out of the
+ * settings object gave numeric key order, which put FLEX last and mislabelled
+ * every slot.
+ */
+const SLOT_ORDER = [
+  [0, 'QB'],
+  [2, 'RB'],
+  [4, 'WR'],
+  [6, 'TE'],
+  [23, 'FLEX'],
+  [3, 'WRRB_FLEX'],
+  [5, 'REC_FLEX'],
+  [7, 'SUPER_FLEX'],
+  [16, 'DEF'],
+  [17, 'K'],
+  [20, 'BN']
+];
+
+/** Slots that hold a player but never score: not starting slots. */
+const NON_SCORING_SLOTS = new Set([21, 24]);
+
+/** Where a slot sits in a lineup, for ordering starters to match. */
+function slotRank(slotId) {
+  const index = SLOT_ORDER.findIndex(([id]) => id === Number(slotId));
+  return index === -1 ? SLOT_ORDER.length : index;
+}
+
 function repeatParams(params) {
   const parts = [];
   for (const [key, value] of Object.entries(params || {})) {
@@ -170,29 +201,15 @@ export class EspnAPI {
    * Get roster position slots
    */
   getRosterPositions(espnData) {
-    const rosterSettings = espnData.settings?.rosterSettings?.lineupSlotCounts || {};
+    const counts = espnData.settings?.rosterSettings?.lineupSlotCounts || {};
     const positions = [];
 
-    // ESPN slot IDs to position names
-    // 'BN' matches what the rest of the tool filters on; 'BENCH' would have
-    // been counted as a starting slot, inflating every lineup by seven players.
-    const slotMap = {
-      0: 'QB',
-      2: 'RB',
-      4: 'WR',
-      6: 'TE',
-      16: 'DEF',
-      17: 'K',
-      23: 'FLEX',
-      20: 'BN',
-      21: 'IR'
-    };
-
-    for (const [slotId, count] of Object.entries(rosterSettings)) {
-      const position = slotMap[slotId] || 'UNKNOWN';
-      for (let i = 0; i < count; i++) {
-        positions.push(position);
-      }
+    // In lineup order, and skipping injured-reserve style slots. Counting IR
+    // as a starting slot left the league claiming ten starters for a nine
+    // player lineup, which broke the index pairing downstream.
+    for (const [slotId, label] of SLOT_ORDER) {
+      const count = Number(counts[slotId] || 0);
+      for (let i = 0; i < count; i++) positions.push(label);
     }
 
     return positions;
@@ -224,22 +241,27 @@ export class EspnAPI {
   parseRoster(rosterData) {
     if (!rosterData?.entries) return { starters: [], bench: [] };
 
-    const starters = [];
     const bench = [];
+    const starting = [];
 
-    rosterData.entries.forEach(entry => {
+    for (const entry of rosterData.entries) {
+      if (entry?.playerId == null) continue;
       const playerId = entry.playerId.toString();
-      const lineupSlotId = entry.lineupSlotId;
+      const slotId = Number(entry.lineupSlotId);
 
-      // 20 is bench in ESPN
-      if (lineupSlotId === 20 || lineupSlotId === 21) {
+      // Bench and injured reserve both sit outside the lineup.
+      if (slotId === 20 || NON_SCORING_SLOTS.has(slotId)) {
         bench.push(playerId);
       } else {
-        starters.push(playerId);
+        starting.push({ playerId, slotId });
       }
-    });
+    }
 
-    return { starters, bench };
+    // Sorted into lineup order so starters pair with the slots the league
+    // reports; ESPN returns them in no particular order.
+    starting.sort((a, b) => slotRank(a.slotId) - slotRank(b.slotId));
+
+    return { starters: starting.map(p => p.playerId), bench };
   }
 
   /**
