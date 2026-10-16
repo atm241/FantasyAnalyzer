@@ -9,13 +9,23 @@ import { TradeAnalyzer } from '../src/services/tradeAnalyzer.js';
  * Without projections the estimate fallback gives every player at a position
  * the same score. These pin down that the tool declines to answer rather than
  * presenting that as a projection.
+ *
+ * Both platforms do publish projections, so this is now about a feed that
+ * cannot be read - an outage, or a league the request failed for - rather than
+ * a platform that has none.
  */
 const withoutProjections = { hasProjections: () => false };
 const withProjections = { hasProjections: () => true };
 
-test('only platforms with a projections feed claim to support one', () => {
+test('both supported platforms publish projections', () => {
+  // ESPN was long assumed to have none; it does, in the player-pool view, so
+  // this records the corrected position rather than the original guess.
   assert.equal(new PlatformAdapter('sleeper').supportsProjections(), true);
-  assert.equal(new PlatformAdapter('espn').supportsProjections(), false);
+  assert.equal(new PlatformAdapter('espn').supportsProjections(), true);
+});
+
+test('an unsupported platform is rejected outright', () => {
+  assert.throws(() => new PlatformAdapter('yahoo'), /Unsupported platform/);
 });
 
 test('the optimiser reports that it cannot project', () => {

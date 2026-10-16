@@ -159,35 +159,38 @@ export class PlatformAdapter {
         () => this.api.getAllPlayers(Boolean(this.config.refreshPlayers))
       );
     } else if (this.platform === 'espn') {
-      // ESPN doesn't have a bulk player endpoint
-      // We'll build a player cache from rosters
-      if (!this.playerCache) {
-        this.playerCache = {};
+      // The player-pool view is the only route to free agents on ESPN; a cache
+      // built from rosters alone left the waiver wire empty.
+      return await this.memo('espnPlayers', async () => {
+        const { week } = await this.getNFLState();
+        const pool = await this.espnPool(week);
+
+        // Rostered players still come from the league payload, since the pool
+        // is capped by ownership and a deep bench player can fall outside it.
+        const players = { ...pool };
 
         if (this.config.leagueId) {
           const leagueData = await this.espnLeague(this.config.leagueId);
-
-          leagueData.teams?.forEach(team => {
-            team.roster?.entries?.forEach(entry => {
-              const player = this.api.parsePlayerData(entry);
-              if (player.playerId) {
-                this.playerCache[player.playerId] = {
-                  player_id: player.playerId,
-                  full_name: player.name,
-                  position: player.position,
-                  team: player.team,
-                  injury_status: player.injuryStatus,
-                  status: player.status,
-                  active: true,
-                  fantasy_positions: [player.position]
-                };
-              }
-            });
-          });
+          for (const team of leagueData.teams || []) {
+            for (const entry of team.roster?.entries || []) {
+              const parsed = this.api.parsePlayerData(entry);
+              if (!parsed.playerId) continue;
+              players[parsed.playerId] = {
+                ...players[parsed.playerId],
+                player_id: parsed.playerId,
+                full_name: parsed.name,
+                position: parsed.position,
+                team: parsed.team,
+                injury_status: parsed.injuryStatus,
+                active: true,
+                rostered: true
+              };
+            }
+          }
         }
-      }
 
-      return this.playerCache;
+        return players;
+      });
     }
   }
 
@@ -212,22 +215,46 @@ export class PlatformAdapter {
         this.config.cookies || {}
       );
 
-      // Convert ESPN matchups to Sleeper format
-      return espnMatchups.map(m => ({
-        roster_id: m.home?.teamId,
-        matchup_id: m.id,
-        points: m.home?.totalPoints || 0,
-        players: m.home?.rosterForCurrentScoringPeriod?.entries?.map(e => e.playerId.toString()) || []
-      })).concat(
-        espnMatchups
-          .filter(m => m.away)
-          .map(m => ({
-            roster_id: m.away.teamId,
-            matchup_id: m.id,
-            points: m.away.totalPoints || 0,
-            players: m.away.rosterForCurrentScoringPeriod?.entries?.map(e => e.playerId.toString()) || []
+      // ESPN keeps the lineup for a week under rosterForCurrentScoringPeriod,
+      // with each player's points on playerPoolEntry.appliedStatTotal. Both
+      // starters and their scores are needed for the slot-by-slot scoreboard;
+      // without them a played week reads as not started.
+      const side = entry => {
+        if (!entry) return null;
+
+        const rows = entry.rosterForCurrentScoringPeriod?.entries ||
+          entry.rosterForMatchupPeriod?.entries || [];
+
+        const starting = rows
+          .filter(row => {
+            const slot = Number(row.lineupSlotId);
+            return slot !== 20 && slot !== 21 && slot !== 24;
+          })
+          .map(row => ({
+            playerId: String(row.playerId),
+            slotId: Number(row.lineupSlotId),
+            points: row.playerPoolEntry?.appliedStatTotal ?? 0
           }))
-      );
+          .sort((a, b) => this.api.slotRank(a.slotId) - this.api.slotRank(b.slotId));
+
+        return {
+          roster_id: entry.teamId,
+          points: entry.totalPoints || 0,
+          players: rows.map(row => String(row.playerId)),
+          starters: starting.map(p => p.playerId),
+          starters_points: starting.map(p => p.points)
+        };
+      };
+
+      const converted = [];
+      for (const matchup of espnMatchups) {
+        for (const entry of [matchup.home, matchup.away]) {
+          const parsed = side(entry);
+          if (parsed) converted.push({ ...parsed, matchup_id: matchup.id });
+        }
+      }
+
+      return converted;
     }
   }
 
@@ -245,6 +272,31 @@ export class PlatformAdapter {
         () => this.api.getProjections(season, week)
       );
     }
+
+    if (this.platform === 'espn') {
+      const pool = await this.espnPool(week);
+      const stats = {};
+      const players = {};
+
+      for (const [playerId, player] of Object.entries(pool)) {
+        if (player.projected_week != null) {
+          // ESPN applies the league's own scoring, so the same figure serves
+          // every scoring format rather than needing a PPR variant.
+          const points = player.projected_week;
+          stats[playerId] = {
+            pts_ppr: points, pts_half_ppr: points, pts_std: points
+          };
+        }
+        players[playerId] = {
+          injury_status: player.injury_status,
+          team: player.team,
+          position: player.position
+        };
+      }
+
+      return { stats, players };
+    }
+
     return { stats: {}, players: {} };
   }
 
@@ -256,7 +308,19 @@ export class PlatformAdapter {
    * and must not be presented as one.
    */
   supportsProjections() {
-    return this.platform === 'sleeper';
+    // ESPN publishes per-player projections too, in the player-pool view.
+    return this.platform === 'sleeper' || this.platform === 'espn';
+  }
+
+  /** The ESPN player pool for a week, fetched once per run. */
+  espnPool(week) {
+    const season = this.config.season || getCurrentSeasonYear();
+    return this.memo(`espnPool:${week}`, () => this.api.getPlayerPool(
+      this.config.leagueId,
+      week,
+      parseInt(season),
+      this.config.cookies || {}
+    ));
   }
 
   /** Projections for a span of weeks, for rest-of-season value. */
@@ -267,6 +331,36 @@ export class PlatformAdapter {
         () => this.api.getProjectionRange(season, fromWeek, toWeek)
       );
     }
+
+    if (this.platform === 'espn') {
+      // ESPN projects a week at a time, so a span means a request per week.
+      // Each is disk-cached and this only runs when something needs the rest
+      // of the season, so the cost is paid once and only when asked for.
+      return await this.memo(`projrange:${season}:${fromWeek}:${toWeek}`, async () => {
+        const weeks = [];
+        for (let week = fromWeek; week <= toWeek; week++) weeks.push(week);
+
+        const pools = await Promise.all(
+          weeks.map(week => this.espnPool(week).catch(() => ({})))
+        );
+
+        const byWeek = {};
+        weeks.forEach((week, index) => {
+          const stats = {};
+          for (const [playerId, player] of Object.entries(pools[index])) {
+            if (player.projected_week == null) continue;
+            const points = player.projected_week;
+            stats[playerId] = {
+              pts_ppr: points, pts_half_ppr: points, pts_std: points
+            };
+          }
+          byWeek[week] = stats;
+        });
+
+        return byWeek;
+      });
+    }
+
     return {};
   }
 

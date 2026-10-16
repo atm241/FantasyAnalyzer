@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { loadSchedule, getCurrentSeasonYear } from '../data/nflSchedule.js';
+import { readCache, writeCache } from '../utils/diskCache.js';
 
 const ESPN_BASE_URL = 'https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons';
 
@@ -30,6 +31,47 @@ const SLOT_ORDER = [
   [17, 'K'],
   [20, 'BN']
 ];
+
+/**
+ * ESPN tags every stat row by where the number came from.
+ *   statSourceId     0 = what happened, 1 = what ESPN projects
+ *   statSplitTypeId  0 = season total,  1 = a single week
+ * So a week's projection is source 1, split 1, at that scoring period. These
+ * projections do exist - the earlier assumption that ESPN published none came
+ * from never requesting the view that carries them.
+ */
+const STAT_ACTUAL = 0;
+const STAT_PROJECTED = 1;
+const SPLIT_SEASON = 0;
+const SPLIT_WEEK = 1;
+
+/** How many players to pull for the waiver wire, most-owned first. */
+const POOL_SIZE = 600;
+
+/** ESPN position ids. */
+const POSITION_BY_ID = { 1: 'QB', 2: 'RB', 3: 'WR', 4: 'TE', 5: 'K', 16: 'DEF' };
+
+/** ESPN injury designations, mapped to the labels the tool uses. */
+const INJURY_BY_ESPN = {
+  ACTIVE: null,
+  QUESTIONABLE: 'Questionable',
+  DOUBTFUL: 'Doubtful',
+  OUT: 'Out',
+  INJURY_RESERVE: 'IR',
+  SUSPENSION: 'Out'
+};
+const POOL_CACHE_HOURS = 6;
+
+/** Pick one applied total out of a player's stat rows. */
+function appliedTotal(player, { source, split, period, seasonId }) {
+  const row = (player?.stats || []).find(stat =>
+    stat.statSourceId === source &&
+    stat.statSplitTypeId === split &&
+    stat.scoringPeriodId === period &&
+    (seasonId === undefined || stat.seasonId === seasonId)
+  );
+  return row?.appliedTotal ?? null;
+}
 
 /** Slots that hold a player but never score: not starting slots. */
 const NON_SCORING_SLOTS = new Set([21, 24]);
@@ -140,6 +182,89 @@ export class EspnAPI {
     } catch (error) {
       throw translateEspnError(error, leagueId);
     }
+  }
+
+  /**
+   * The league's player pool for a week, with ESPN's own projections.
+   *
+   * This is the only route to two things the tool needs and previously had no
+   * source for on ESPN: free agents (so the waiver wire is not empty) and
+   * per-player projections. The payload is large, so it is slimmed to the
+   * fields used and cached.
+   */
+  /** Where a lineup slot sits in the conventional order. */
+  slotRank(slotId) {
+    return slotRank(slotId);
+  }
+
+  async getPlayerPool(leagueId, week, seasonId = getCurrentSeasonYear(), cookies = {}) {
+    const cacheKey = `espn-pool-${leagueId}-${seasonId}-${week}`;
+    const cached = readCache(cacheKey, POOL_CACHE_HOURS);
+    if (cached) return cached;
+
+    const config = {
+      params: { view: 'kona_player_info', scoringPeriodId: week },
+      paramsSerializer: repeatParams,
+      headers: {
+        // Most-owned first, so the cut-off lands on genuinely rostered players
+        // rather than an arbitrary slice of the league's deep bench.
+        'x-fantasy-filter': JSON.stringify({
+          players: {
+            limit: POOL_SIZE,
+            sortPercOwned: { sortAsc: false, sortPriority: 1 }
+          }
+        })
+      }
+    };
+
+    if (cookies.espn_s2 && cookies.SWID) {
+      config.headers.Cookie = `espn_s2=${cookies.espn_s2}; SWID=${cookies.SWID}`;
+    }
+
+    let response;
+    try {
+      response = await axios.get(
+        `${this.baseURL}/${seasonId}/segments/0/leagues/${leagueId}`,
+        config
+      );
+    } catch (error) {
+      throw translateEspnError(error, leagueId);
+    }
+
+    const pool = {};
+    for (const entry of response.data?.players || []) {
+      const player = entry.player;
+      if (!player?.id) continue;
+
+      const position = POSITION_BY_ID[player.defaultPositionId] || 'UNKNOWN';
+
+      pool[String(player.id)] = {
+        player_id: String(player.id),
+        full_name: player.fullName,
+        position,
+        // The rest of the tool filters on this Sleeper-shaped field, so ESPN
+        // records carry it too rather than every consumer special-casing.
+        fantasy_positions: position === 'UNKNOWN' ? [] : [position],
+        team: this.getTeamAbbr(player.proTeamId),
+        injury_status: INJURY_BY_ESPN[player.injuryStatus] || null,
+        active: player.active !== false,
+        percent_owned: entry.onTeamId ? null : player.ownership?.percentOwned ?? null,
+        rostered: Boolean(entry.onTeamId),
+        projected_week: appliedTotal(player, {
+          source: STAT_PROJECTED, split: SPLIT_WEEK, period: week, seasonId: Number(seasonId)
+        }),
+        projected_season: appliedTotal(player, {
+          source: STAT_PROJECTED, split: SPLIT_SEASON, period: 0, seasonId: Number(seasonId)
+        }),
+        actual_week: appliedTotal(player, {
+          source: STAT_ACTUAL, split: SPLIT_WEEK, period: week, seasonId: Number(seasonId)
+        })
+      };
+    }
+
+    // Only keep a pool that actually came back populated.
+    if (Object.keys(pool).length > 0) writeCache(cacheKey, pool);
+    return pool;
   }
 
   /**
