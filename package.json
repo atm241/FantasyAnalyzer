@@ -1,7 +1,7 @@
 {
   "name": "fantasy-analyzer",
   "version": "1.0.0",
-  "description": "Sleeper fantasy football optimizer for lineup decisions and waiver pickups",
+  "description": "Fantasy football analyzer for Sleeper and ESPN leagues: lineups, waivers, trades, and standings",
   "main": "src/index.js",
   "type": "module",
   "scripts": {
@@ -14,6 +14,7 @@
     "fantasy",
     "football",
     "sleeper",
+    "espn",
     "optimizer"
   ],
   "author": "",
@@ -22,5 +23,8 @@
     "axios": "^1.6.0",
     "chalk": "^5.3.0",
     "commander": "^11.1.0"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }
