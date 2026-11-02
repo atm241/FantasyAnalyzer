@@ -93,6 +93,47 @@ export function describeLeague(entry) {
 }
 
 /**
+ * Find this season's continuation of a league from an earlier season.
+ *
+ * Sleeper gives a renewed league a new id every year, so a saved id goes stale
+ * when a season rolls over. A renewal links back through previous_league_id;
+ * failing that, a league with the very same name is taken only when there is
+ * exactly one, so a guess never picks between two candidates.
+ */
+export function findRenewedLeague(oldLeague, leagues = []) {
+  const linked = leagues.find(l => l.previous_league_id === oldLeague.league_id);
+  if (linked) return linked;
+
+  const sameName = leagues.filter(l => l.name === oldLeague.name);
+  return sameName.length === 1 ? sameName[0] : null;
+}
+
+/**
+ * Point a saved league at its renewed id. The watchlist moves with it, since
+ * the players being tracked carry over between seasons.
+ */
+export function moveLeague(platform, oldId, renewed) {
+  const config = loadConfig();
+  const entry = config.leagues.find(saved =>
+    saved.platform === platform && saved.leagueId === oldId
+  );
+  if (entry) {
+    Object.assign(entry, {
+      leagueId: renewed.league_id,
+      name: renewed.name,
+      season: renewed.season || null
+    });
+  }
+
+  if (config.watchlists?.[oldId]) {
+    config.watchlists[renewed.league_id] ||= config.watchlists[oldId];
+    delete config.watchlists[oldId];
+  }
+
+  return saveConfig(config);
+}
+
+/**
  * Players you are tracking in a league, stored per league so two leagues do not
  * share a list. Each entry keeps the last value seen, which is what lets the
  * report show whether a player is rising or fading since you last looked.

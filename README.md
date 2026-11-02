@@ -263,6 +263,11 @@ They live in `config.json` beside the project, which is gitignored. ESPN private
 leagues need cookies to read at all, so those are stored there too - treat the
 file as a local credential store.
 
+Saved leagues carry over to a new season on their own. Sleeper gives a renewed
+league a new ID each year, so when a saved Sleeper league is from an earlier
+season the tool finds its renewal and updates the saved entry (and watchlist)
+to point at it. ESPN keeps the same league ID across seasons.
+
 Pass `--platform`, `--league` or `--username` to skip the picker entirely
 (useful in scripts). Everything else is prompted for.
 

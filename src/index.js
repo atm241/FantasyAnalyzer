@@ -24,7 +24,8 @@ import { getRankingsSeason } from './data/teamRankings.js';
 import { getPlayerName } from './utils/playerName.js';
 import {
   getSavedLeagues, rememberLeague, forgetLeague, describeLeague, CONFIG_PATH,
-  getWatchlist, watchPlayer, unwatchPlayer, recordWatchValues
+  getWatchlist, watchPlayer, unwatchPlayer, recordWatchValues,
+  findRenewedLeague, moveLeague
 } from './utils/savedLeagues.js';
 
 let api, rosterService, optimizer, waiverAnalyzer, aiSummary, firstToGo, standings, tradeAnalyzer, playerLookup, watchlist, gameday;
@@ -299,7 +300,7 @@ async function selectLeague(username) {
     const user = await api.getUser(username);
 
     // Try current season and previous seasons
-    const currentYear = new Date().getFullYear();
+    const currentYear = getCurrentSeasonYear();
     const seasons = [currentYear.toString(), (currentYear - 1).toString()];
 
     let allLeagues = [];
@@ -341,6 +342,28 @@ async function selectLeague(username) {
 }
 
 /**
+ * A saved Sleeper league from an earlier season is switched to its renewal,
+ * so the saved list keeps working when a new season starts. Anything that goes
+ * wrong leaves the original league in place.
+ */
+async function followRenewal(user, league) {
+  const season = api.config?.season || getCurrentSeasonYear();
+  if (Number(league.season) >= season) return league;
+
+  try {
+    const leagues = await api.getUserLeagues(user.user_id, season);
+    const renewed = findRenewedLeague(league, leagues);
+    if (!renewed) return league;
+
+    moveLeague(api.platform, league.league_id, renewed);
+    display.displayInfo(`"${league.name}" has a ${season} season - switched to it.`);
+    return renewed;
+  } catch {
+    return league;
+  }
+}
+
+/**
  * Main application flow
  */
 async function runAnalyzer(username, leagueId, actions = {}) {
@@ -354,6 +377,7 @@ async function runAnalyzer(username, leagueId, actions = {}) {
     // Get league
     if (leagueId) {
       league = await api.getLeague(leagueId);
+      if (api.platform === 'sleeper') league = await followRenewal(user, league);
     } else {
       const selection = await selectLeague(username);
       if (!selection) return;
