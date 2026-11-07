@@ -589,7 +589,7 @@ export class DisplayFormatter {
     players.forEach((player, idx) => {
       if (player && player.name) {
         const status = this.getStatusIndicator(player);
-        console.log(`${idx + 1}. ${player.name.padEnd(25)} ${(player.position || 'N/A').padEnd(4)} ${(player.team || 'FA').padEnd(4)} ${status.padEnd(10)} ${chalk.yellow(`+${player.trendCount} adds`)}`);
+        console.log(`${idx + 1}. ${player.name.padEnd(25)} ${(player.position || 'N/A').padEnd(4)} ${(player.team || 'FA').padEnd(4)} ${status.padEnd(10)} ${chalk.yellow(player.trendUnit === 'percent' ? `+${player.trendCount}% owned` : `+${player.trendCount} adds`)}`);
       }
     });
 

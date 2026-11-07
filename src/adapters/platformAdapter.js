@@ -1,6 +1,6 @@
 import { SleeperAPI } from '../api/sleeper.js';
 import { EspnAPI } from '../api/espn.js';
-import { getCurrentSeasonYear } from '../data/nflSchedule.js';
+import { getCurrentSeasonYear, loadSchedule } from '../data/nflSchedule.js';
 
 /**
  * Platform adapter to normalize data from different fantasy platforms
@@ -92,8 +92,19 @@ export class PlatformAdapter {
       return await this.memo(`league:${leagueId}`, () => this.api.getLeague(leagueId));
     } else if (this.platform === 'espn') {
       const leagueData = await this.espnLeague(leagueId);
-      return this.api.parseLeagueData(leagueData);
+      const league = this.api.parseLeagueData(leagueData);
+      league.settings.trade_deadline = await this.deadlineWeek(
+        league.settings.trade_deadline_date, league.season
+      );
+      return league;
     }
+  }
+
+  /** The NFL week an ESPN trade deadline date falls in, as Sleeper reports it. */
+  async deadlineWeek(deadlineDate, season) {
+    if (!deadlineDate) return null;
+    const schedule = await loadSchedule(season).catch(() => null);
+    return schedule ? schedule.currentWeek(new Date(deadlineDate)) : null;
   }
 
   /**
@@ -116,7 +127,9 @@ export class PlatformAdapter {
             wins: parsed.wins,
             losses: parsed.losses,
             ties: parsed.ties,
-            fpts: parsed.pointsFor
+            fpts: parsed.pointsFor,
+            fpts_against: parsed.pointsAgainst,
+            waiver_budget_used: parsed.waiverBudgetUsed
           }
         };
       });
@@ -180,6 +193,7 @@ export class PlatformAdapter {
                 player_id: parsed.playerId,
                 full_name: parsed.name,
                 position: parsed.position,
+                fantasy_positions: parsed.position === 'UNKNOWN' ? [] : [parsed.position],
                 team: parsed.team,
                 injury_status: parsed.injuryStatus,
                 active: true,
@@ -239,7 +253,11 @@ export class PlatformAdapter {
 
         return {
           roster_id: entry.teamId,
-          points: entry.totalPoints || 0,
+          // While a week is in progress ESPN leaves totalPoints at 0 and keeps
+          // the running score in totalPointsLive; totalPoints only fills in
+          // once the week is final. Reading totalPoints alone froze the live
+          // score at 0.
+          points: entry.totalPointsLive ?? entry.totalPoints ?? 0,
           players: rows.map(row => String(row.playerId)),
           starters: starting.map(p => p.playerId),
           starters_points: starting.map(p => p.points)
@@ -371,8 +389,21 @@ export class PlatformAdapter {
         () => this.api.getTrendingPlayers(type, hours)
       );
     } else if (this.platform === 'espn') {
-      // ESPN doesn't have trending data, return empty
-      return [];
+      // ESPN has no add counts, but the player pool carries each player's
+      // change in ownership across ESPN leagues, which picks out the same
+      // risers. Only increases count for adds.
+      if (type !== 'add') return [];
+      const { week } = await this.getNFLState();
+      const pool = await this.espnPool(week).catch(() => ({}));
+      return Object.values(pool)
+        .filter(player => !player.rostered && player.percent_change > 0.5)
+        .sort((a, b) => b.percent_change - a.percent_change)
+        .slice(0, 25)
+        .map(player => ({
+          player_id: player.player_id,
+          count: Math.round(player.percent_change * 10) / 10,
+          unit: 'percent'
+        }));
     }
   }
 }

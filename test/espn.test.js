@@ -128,3 +128,50 @@ test('a roster entry with no player id is skipped rather than crashing', () => {
   });
   assert.deepEqual(parsed.starters, ['123']);
 });
+
+// --- live scoring and the playoff calendar ---
+
+import { matchupPeriodFor, playoffStartWeek } from '../src/api/espn.js';
+import { PlatformAdapter } from '../src/adapters/platformAdapter.js';
+
+const twoWeekPlayoffs = {
+  scheduleSettings: {
+    matchupPeriodCount: 13,
+    matchupPeriods: { 12: [12], 13: [13], 14: [14, 15], 15: [16, 17] }
+  }
+};
+
+test('a two-week playoff round maps both weeks to one matchup period', () => {
+  assert.equal(matchupPeriodFor(twoWeekPlayoffs, 13), 13);
+  assert.equal(matchupPeriodFor(twoWeekPlayoffs, 15), 14);
+  assert.equal(matchupPeriodFor(twoWeekPlayoffs, 16), 15);
+  // No map at all falls back to the week itself.
+  assert.equal(matchupPeriodFor({}, 7), 7);
+});
+
+test('playoffs start the week after the regular season, from the league settings', () => {
+  assert.equal(playoffStartWeek(twoWeekPlayoffs), 14);
+  assert.equal(playoffStartWeek({}), 15);
+});
+
+test('a week in progress reads the live score, not the unset final one', async () => {
+  const adapter = new PlatformAdapter('espn', { leagueId: 'L', season: 2026 });
+  const side = (teamId, live, final) => ({
+    teamId,
+    totalPoints: final,
+    ...(live === undefined ? {} : { totalPointsLive: live }),
+    rosterForCurrentScoringPeriod: {
+      entries: [{ playerId: teamId * 10, lineupSlotId: 0, playerPoolEntry: { appliedStatTotal: live ?? final } }]
+    }
+  });
+  adapter.api.getMatchups = async () => ([
+    { id: 1, home: side(1, 30.58, 0), away: side(2, 12, 0) },
+    { id: 2, home: side(3, undefined, 105.44), away: side(4, undefined, 99) }
+  ]);
+
+  const matchups = await adapter.getMatchups('L', 9);
+  const points = Object.fromEntries(matchups.map(m => [m.roster_id, m.points]));
+  assert.equal(points[1], 30.58, 'live week uses totalPointsLive');
+  assert.equal(points[2], 12);
+  assert.equal(points[3], 105.44, 'a finished week, which has no live field, uses totalPoints');
+});

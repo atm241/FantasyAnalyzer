@@ -438,7 +438,8 @@ export class WaiverAnalyzer {
         const player = available.find(p => p.playerId === t.player_id);
         return {
           ...player,
-          trendCount: t.count
+          trendCount: t.count,
+          trendUnit: t.unit || 'adds'
         };
       })
       .slice(0, 20);

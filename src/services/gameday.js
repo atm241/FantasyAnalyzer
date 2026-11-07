@@ -76,6 +76,21 @@ export class GamedayService {
     return stats.pts_ppr ?? stats.pts_half_ppr ?? stats.pts_std ?? 0;
   }
 
+  /**
+   * Projected points a starter has yet to add.
+   *
+   * Upcoming: the whole projection. Playing: whatever of the projection they
+   * have not reached yet, so the finish moves as they score instead of
+   * dropping their projection the moment they kick off. Done or bye: nothing.
+   */
+  stillToCome(starter) {
+    if (starter.empty) return 0;
+    const projected = this.projectedFor(starter.playerId) ?? 0;
+    if (starter.state === 'upcoming') return projected;
+    if (starter.state === 'playing') return Math.max(projected - starter.points, 0);
+    return 0;
+  }
+
   async getLiveMatchup(leagueId, userId) {
     const week = await this.rosterService.getCurrentWeek();
     const [matchups, rosters, users, league, players] = await Promise.all([
@@ -139,8 +154,8 @@ export class GamedayService {
         yetToPlay: remaining.length,
         playing: starters.filter(p => p.state === 'playing').length,
         // Points still on the table, from the projections already loaded.
-        remainingProjected: remaining.reduce(
-          (sum, p) => sum + (this.projectedFor(p.playerId) ?? 0), 0
+        remainingProjected: starters.reduce(
+          (sum, p) => sum + this.stillToCome(p), 0
         )
       };
     };

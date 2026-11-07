@@ -82,6 +82,41 @@ function slotRank(slotId) {
   return index === -1 ? SLOT_ORDER.length : index;
 }
 
+/**
+ * The matchup period an NFL week belongs to.
+ *
+ * In the regular season they are the same number, but a two-week playoff round
+ * covers two weeks under one period (e.g. period 14 = weeks 14 and 15), so after
+ * the first such round the numbers no longer match.
+ */
+export function matchupPeriodFor(settings, week) {
+  const periods = settings?.scheduleSettings?.matchupPeriods || {};
+  for (const [period, weeks] of Object.entries(periods)) {
+    if ((weeks || []).map(Number).includes(Number(week))) return Number(period);
+  }
+  return Number(week);
+}
+
+/** The first NFL week of the playoffs. */
+export function playoffStartWeek(settings) {
+  const schedule = settings?.scheduleSettings || {};
+  const regularPeriods = Number(schedule.matchupPeriodCount);
+  if (!regularPeriods) return 15;
+  const firstPlayoff = schedule.matchupPeriods?.[regularPeriods + 1];
+  return Number(firstPlayoff?.[0]) || regularPeriods + 1;
+}
+
+/**
+ * Overall rank, as a stand-in for Sleeper's search_rank: the season-to-date
+ * ranking once games are played, the draft ranking before that.
+ */
+function overallRank(entry) {
+  const inSeason = entry?.ratings?.[0]?.totalRanking;
+  if (inSeason > 0) return inSeason;
+  const draft = entry?.player?.draftRanksByRankType?.PPR?.rank;
+  return draft > 0 ? draft : null;
+}
+
 function repeatParams(params) {
   const parts = [];
   for (const [key, value] of Object.entries(params || {})) {
@@ -161,7 +196,9 @@ export class EspnAPI {
   async getLeagueForWeek(leagueId, seasonId, week, cookies = {}) {
     const config = {
       params: {
-        view: ['mMatchup', 'mMatchupScore'],
+        // mSettings carries the week-to-matchup map that two-week playoff
+        // rounds need.
+        view: ['mMatchup', 'mMatchupScore', 'mSettings'],
         scoringPeriodId: week
       },
       paramsSerializer: repeatParams
@@ -198,7 +235,8 @@ export class EspnAPI {
   }
 
   async getPlayerPool(leagueId, week, seasonId = getCurrentSeasonYear(), cookies = {}) {
-    const cacheKey = `espn-pool-${leagueId}-${seasonId}-${week}`;
+    // Versioned so pools cached before a field was added are not reused.
+    const cacheKey = `espn-pool-v2-${leagueId}-${seasonId}-${week}`;
     const cached = readCache(cacheKey, POOL_CACHE_HOURS);
     if (cached) return cached;
 
@@ -249,6 +287,10 @@ export class EspnAPI {
         injury_status: INJURY_BY_ESPN[player.injuryStatus] || null,
         active: player.active !== false,
         percent_owned: entry.onTeamId ? null : player.ownership?.percentOwned ?? null,
+        // Change in league-wide ownership over the last week: ESPN's nearest
+        // equivalent of Sleeper's trending adds.
+        percent_change: player.ownership?.percentChange ?? null,
+        search_rank: overallRank(entry),
         rostered: Boolean(entry.onTeamId),
         projected_week: appliedTotal(player, {
           source: STAT_PROJECTED, split: SPLIT_WEEK, period: week, seasonId: Number(seasonId)
@@ -300,22 +342,28 @@ export class EspnAPI {
    */
   async getMatchups(leagueId, seasonId, week, cookies = {}) {
     const leagueData = await this.getLeagueForWeek(leagueId, seasonId, week, cookies);
-    return leagueData.schedule?.filter(m => m.matchupPeriodId === week) || [];
+    const period = matchupPeriodFor(leagueData.settings, week);
+    return leagueData.schedule?.filter(m => m.matchupPeriodId === period) || [];
   }
 
   /**
    * Parse ESPN league data into normalized format
    */
   parseLeagueData(espnData) {
+    const acquisition = espnData.settings?.acquisitionSettings || {};
     return {
       league_id: espnData.id.toString(),
       name: espnData.settings?.name || 'ESPN League',
       season: espnData.seasonId,
       settings: {
         playoff_teams: espnData.settings?.scheduleSettings?.playoffTeamCount || 6,
-        playoff_week_start: espnData.settings?.scheduleSettings?.playoffMatchupPeriodLength ?
-          (espnData.settings.scheduleSettings.regularSeasonMatchupPeriodCount + 1) : 15,
-        num_teams: espnData.settings?.size || espnData.teams?.length || 0
+        playoff_week_start: playoffStartWeek(espnData.settings),
+        num_teams: espnData.settings?.size || espnData.teams?.length || 0,
+        // Sleeper's waiver_type 2 means FAAB; the rest of the tool checks that.
+        waiver_type: acquisition.isUsingAcquisitionBudget ? 2 : 0,
+        waiver_budget: acquisition.isUsingAcquisitionBudget ? acquisition.acquisitionBudget || 0 : 0,
+        // ESPN gives a date; the adapter turns it into the week Sleeper uses.
+        trade_deadline_date: espnData.settings?.tradeSettings?.deadlineDate || null
       },
       scoring_settings: espnData.settings?.scoringSettings || {},
       roster_positions: this.getRosterPositions(espnData)
@@ -355,6 +403,7 @@ export class EspnAPI {
       ties: espnTeam.record?.overall?.ties || 0,
       pointsFor: espnTeam.record?.overall?.pointsFor || 0,
       pointsAgainst: espnTeam.record?.overall?.pointsAgainst || 0,
+      waiverBudgetUsed: espnTeam.transactionCounter?.acquisitionBudgetSpent || 0,
       roster: this.parseRoster(espnTeam.roster),
       username: owner?.displayName || 'Unknown'
     };

@@ -112,6 +112,21 @@ test('before kickoff there is no score, so it is projected', async () => {
   assert.equal(matchup.you.yetToPlay, 2);
 });
 
+test('a player mid-game still counts the rest of their projection', async () => {
+  const service = buildService({ allStates: 'playing', yourPoints: 50, theirPoints: 70 });
+  service.rosterService.projections = {
+    a: { pts_ppr: 60 }, b: { pts_ppr: 20 }, c: { pts_ppr: 40 }, d: { pts_ppr: 10 }
+  };
+  const matchup = await service.getLiveMatchup('L', 'me');
+
+  assert.equal(matchup.state, 'live');
+  // a is playing on 50 of a 60 projection: 10 still to come. b has not started.
+  assert.equal(matchup.you.remainingProjected, 10 + 20);
+  assert.equal(matchup.projectedFinish.you, 50 + 30);
+  // c is already past their projection, so nothing more is assumed.
+  assert.equal(matchup.projectedFinish.opponent, 70 + 10);
+});
+
 /**
  * A service wired to fixtures: two starters a side, with game states driven by
  * a schedule built for the purpose.
@@ -121,6 +136,7 @@ function buildService({ allStates, yourPoints, theirPoints }) {
   const statusFor = index => {
     if (allStates === 'done') return 'complete';
     if (allStates === 'upcoming') return 'pre_game';
+    if (allStates === 'playing') return index === 0 ? 'in_game' : 'pre_game';
     return index === 0 ? 'complete' : 'pre_game';
   };
 

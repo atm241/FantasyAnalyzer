@@ -404,47 +404,9 @@ async function runAnalyzer(username, leagueId, actions = {}) {
       console.log(`Saved "${league.name}" for next time (${CONFIG_PATH}).`);
     }
 
-    // Adding or removing a watched player is a quick edit, not an analysis.
-    if (actions.watch || actions.unwatch) {
-      await editWatchlist(league, actions);
-      return;
-    }
-
-    // On Sunday afternoons the scoreboard is what you want, not analysis.
-    // --live forces it, --no-live suppresses it, otherwise it follows kickoff.
-    const wantsLive = actions.live === undefined ? isGameday() : actions.live;
-    if (wantsLive) {
-      const live = await gameday
-        .getLiveMatchup(league.league_id, user.user_id)
-        .catch(() => null);
-
-      if (live) {
-        display.displayLiveMatchup(live);
-        return;
-      }
-      if (actions.live) {
-        display.displayError('No matchup found for this week.');
-        return;
-      }
-    }
-
-    // A single-player lookup answers one question, so it skips the full report.
-    if (actions.player) {
-      await runPlayerLookup(league, user, actions.player);
-      return;
-    }
-
-    // Get and display current week
-    const currentWeek = await rosterService.getCurrentWeek();
-    await rosterService.ensureSeasonData();
-    display.displayInfo(`Analyzing Week ${currentWeek}`);
-
-    const rankingsSeason = getRankingsSeason();
-    if (rankingsSeason) {
-      display.displayInfo(`Offensive tiers based on ${rankingsSeason} scoring`);
-    }
-
-    // For ESPN, find the user's team by matching username/team name
+    // For ESPN, find the user's team by matching username/team name. This has
+    // to happen before the live scoreboard, watchlist and player lookup, which
+    // all need the real team rather than the placeholder ESPN user.
     if (api.platform === 'espn') {
       const users = await api.getLeagueUsers(league.league_id);
 
@@ -504,6 +466,46 @@ async function runAnalyzer(username, leagueId, actions = {}) {
           return;
         }
       }
+    }
+
+    // Adding or removing a watched player is a quick edit, not an analysis.
+    if (actions.watch || actions.unwatch) {
+      await editWatchlist(league, actions);
+      return;
+    }
+
+    // On Sunday afternoons the scoreboard is what you want, not analysis.
+    // --live forces it, --no-live suppresses it, otherwise it follows kickoff.
+    const wantsLive = actions.live === undefined ? isGameday() : actions.live;
+    if (wantsLive) {
+      const live = await gameday
+        .getLiveMatchup(league.league_id, user.user_id)
+        .catch(() => null);
+
+      if (live) {
+        display.displayLiveMatchup(live);
+        return;
+      }
+      if (actions.live) {
+        display.displayError('No matchup found for this week.');
+        return;
+      }
+    }
+
+    // A single-player lookup answers one question, so it skips the full report.
+    if (actions.player) {
+      await runPlayerLookup(league, user, actions.player);
+      return;
+    }
+
+    // Get and display current week
+    const currentWeek = await rosterService.getCurrentWeek();
+    await rosterService.ensureSeasonData();
+    display.displayInfo(`Analyzing Week ${currentWeek}`);
+
+    const rankingsSeason = getRankingsSeason();
+    if (rankingsSeason) {
+      display.displayInfo(`Offensive tiers based on ${rankingsSeason} scoring`);
     }
 
     // Where this team sits in its competitive window. Everything downstream -
