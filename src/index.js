@@ -491,9 +491,17 @@ async function runAnalyzer(username, leagueId, actions = {}) {
 
       if (live) {
         display.displayLiveMatchup(live);
-        return;
-      }
-      if (actions.live) {
+
+        // The scoreboard comes first on game day, but the rest of the
+        // dashboard (lineup, waivers, trades) is one keypress away.
+        // Out of input (a piped or scripted run): stop here as before. Checked
+        // before asking, since a waiting Enter is still a real answer.
+        if (inputClosed && bufferedLines.length === 0) return;
+        const answer = (await prompt(
+          '\nPress Enter to open the full team dashboard, or q to quit: '
+        )).trim().toLowerCase();
+        if (answer === 'q' || answer === 'quit') return;
+      } else if (actions.live) {
         display.displayError('No matchup found for this week.');
         return;
       }
