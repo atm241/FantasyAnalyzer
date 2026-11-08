@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { findRenewedLeague } from '../src/utils/savedLeagues.js';
+import { findRenewedLeague, matchEspnTeam, describeLeague } from '../src/utils/savedLeagues.js';
 
 const lastSeason = { league_id: 'old', name: 'Chill League', season: '2026' };
 
@@ -30,4 +30,43 @@ test('two leagues of the same name are never guessed between', () => {
 test('a league that was not renewed stays unmatched', () => {
   assert.equal(findRenewedLeague(lastSeason, [{ league_id: 'x', name: 'Other' }]), null);
   assert.equal(findRenewedLeague(lastSeason, []), null);
+});
+
+// --- remembering your ESPN team ---
+
+const espnUsers = [
+  { user_id: '{A}', display_name: 'alex', metadata: { team_name: 'Crime Scene' } },
+  { user_id: '{B}', display_name: 'sam', metadata: { team_name: 'Winner Winner Chicken Dinner' } },
+  { user_id: '{C}', display_name: 'jo', metadata: { team_name: 'Chicken Little' } }
+];
+
+test('the saved team is found by owner id even after a rename', () => {
+  const match = matchEspnTeam(espnUsers, { name: 'Old Team Name', savedOwnerId: '{B}' });
+  assert.equal(match.user_id, '{B}');
+});
+
+test('a team typed out in full beats the saved one', () => {
+  const match = matchEspnTeam(espnUsers, { name: 'chicken little', savedOwnerId: '{B}' });
+  assert.equal(match.user_id, '{C}');
+});
+
+test('without a saved team, part of a team or owner name still matches', () => {
+  assert.equal(matchEspnTeam(espnUsers, { name: 'crime' }).user_id, '{A}');
+  assert.equal(matchEspnTeam(espnUsers, { name: 'sam' }).user_id, '{B}');
+});
+
+test('an empty name never matches the first team by accident', () => {
+  // Every string contains '', which used to pick team 1 silently.
+  assert.equal(matchEspnTeam(espnUsers, { name: '' }), null);
+  assert.equal(matchEspnTeam(espnUsers, { name: '  ' }), null);
+});
+
+test('a saved owner who has left the league falls back to the name', () => {
+  assert.equal(matchEspnTeam(espnUsers, { name: 'crime', savedOwnerId: '{Z}' }).user_id, '{A}');
+  assert.equal(matchEspnTeam(espnUsers, { savedOwnerId: '{Z}' }), null);
+});
+
+test('the saved list shows the ESPN team alongside the league', () => {
+  const label = describeLeague({ platform: 'espn', name: 'My League', teamName: 'Crime Scene' });
+  assert.equal(label, 'My League (ESPN - Crime Scene)');
 });

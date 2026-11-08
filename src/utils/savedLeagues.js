@@ -77,6 +77,71 @@ export function rememberLeague(entry) {
   return true;
 }
 
+/**
+ * The ESPN team remembered for a league, so later runs skip the team prompt.
+ *
+ * ESPN has no username to log in with, so the team is the identity. It is kept
+ * by owner id, which survives the team being renamed; the name is only for
+ * display.
+ */
+export function getSavedEspnTeam(leagueId) {
+  if (!leagueId) return null;
+  const entry = loadConfig().leagues.find(saved =>
+    saved.platform === 'espn' && String(saved.leagueId) === String(leagueId) && saved.teamOwnerId
+  );
+  return entry ? { ownerId: entry.teamOwnerId, teamName: entry.teamName || null } : null;
+}
+
+/**
+ * Remember which team is yours in an ESPN league. Returns true when this
+ * changed what was stored.
+ */
+export function rememberEspnTeam(leagueId, ownerId, teamName) {
+  if (!leagueId || !ownerId) return false;
+
+  const config = loadConfig();
+  const entries = config.leagues.filter(saved =>
+    saved.platform === 'espn' && String(saved.leagueId) === String(leagueId)
+  );
+  if (entries.length === 0) return false;
+
+  const changed = entries.some(entry =>
+    entry.teamOwnerId !== ownerId || entry.teamName !== teamName
+  );
+  if (!changed) return false;
+
+  for (const entry of entries) Object.assign(entry, { teamOwnerId: ownerId, teamName });
+  return saveConfig(config);
+}
+
+/**
+ * Find your team among an ESPN league's users.
+ *
+ * In order: a team whose name matches what you typed exactly, the team saved
+ * from a previous run, then a team or owner name containing what you typed.
+ * An empty name never matches by text, since every name contains ''.
+ */
+export function matchEspnTeam(users = [], { name, savedOwnerId } = {}) {
+  const typed = (name || '').trim().toLowerCase();
+  const teamName = user => (user.metadata?.team_name || '').toLowerCase();
+
+  if (typed) {
+    const exact = users.find(user => teamName(user) === typed);
+    if (exact) return exact;
+  }
+
+  if (savedOwnerId) {
+    const saved = users.find(user => user.user_id === savedOwnerId);
+    if (saved) return saved;
+  }
+
+  if (!typed) return null;
+  return users.find(user =>
+    teamName(user).includes(typed) ||
+    (user.display_name || '').toLowerCase().includes(typed)
+  ) || null;
+}
+
 export function forgetLeague(index) {
   const config = loadConfig();
   if (index < 0 || index >= config.leagues.length) return false;
@@ -87,7 +152,8 @@ export function forgetLeague(index) {
 /** One-line description for the picker. */
 export function describeLeague(entry) {
   const platform = entry.platform.toUpperCase();
-  const who = entry.username ? ` - ${entry.username}` : '';
+  const owner = entry.username || entry.teamName;
+  const who = owner ? ` - ${owner}` : '';
   const name = entry.name || entry.leagueId || 'league';
   return `${name} (${platform}${who})`;
 }

@@ -24,6 +24,7 @@ import { getRankingsSeason } from './data/teamRankings.js';
 import { getPlayerName } from './utils/playerName.js';
 import {
   getSavedLeagues, rememberLeague, forgetLeague, describeLeague, CONFIG_PATH,
+  getSavedEspnTeam, rememberEspnTeam, matchEspnTeam,
   getWatchlist, watchPlayer, unwatchPlayer, recordWatchValues,
   findRenewedLeague, moveLeague
 } from './utils/savedLeagues.js';
@@ -409,12 +410,12 @@ async function runAnalyzer(username, leagueId, actions = {}) {
     // all need the real team rather than the placeholder ESPN user.
     if (api.platform === 'espn') {
       const users = await api.getLeagueUsers(league.league_id);
+      const savedTeam = getSavedEspnTeam(league.league_id);
 
-      // Try to match by display name or team name
-      const matchedUser = users.find(u =>
-        u.display_name?.toLowerCase().includes(username.toLowerCase()) ||
-        u.metadata?.team_name?.toLowerCase().includes(username.toLowerCase())
-      );
+      const matchedUser = matchEspnTeam(users, {
+        name: username,
+        savedOwnerId: savedTeam?.ownerId
+      });
 
       if (matchedUser) {
         user = matchedUser;
@@ -465,6 +466,12 @@ async function runAnalyzer(username, leagueId, actions = {}) {
           display.displayError('Invalid team selection');
           return;
         }
+      }
+
+      // Remember the team so the next run goes straight to it.
+      const teamName = user.metadata?.team_name || user.display_name;
+      if (rememberEspnTeam(league.league_id, user.user_id, teamName)) {
+        display.displayInfo(`Saved ${teamName} as your team for next time.`);
       }
     }
 
@@ -774,9 +781,12 @@ program
         }
       }
 
-      // ESPN doesn't use username, so create a placeholder
+      // ESPN has no username, so your team stands in for one. A team saved
+      // from an earlier run is used without asking again.
       if (!options.username) {
-        options.username = await prompt('Enter your team name or identifier: ');
+        const savedTeam = getSavedEspnTeam(options.league);
+        options.username = savedTeam?.teamName ||
+          await prompt('Enter your team name or identifier: ');
       }
     } else {
       // Sleeper-specific
